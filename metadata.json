@@ -1,0 +1,5 @@
+{
+  "name": "TutorMatch",
+  "description": "A platform connecting students with tutors. Students browse jobs, pay via QR code to unlock contact details, and Admins approve orders. Includes Gemini-powered job description generation.",
+  "requestFramePermissions": []
+}
