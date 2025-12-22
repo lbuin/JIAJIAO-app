@@ -54,7 +54,6 @@ export const StudentHome: React.FC = () => {
         .order('created_at', { ascending: false });
 
       if (error) {
-         // Graceful fallback for demo
         if (error.message.includes('column "status" does not exist')) {
             const { data: fallbackData } = await supabase.from('jobs').select('*').eq('is_active', true);
             setJobs(fallbackData || []);
@@ -125,7 +124,7 @@ export const StudentHome: React.FC = () => {
     setSelectedJob(job);
     setTempContact(studentContact);
 
-    // If already approved by parent, show payment QR immediately
+    // If approved by Admin/Parent, show payment QR immediately
     if (status === OrderStatus.PARENT_APPROVED) {
         setStep('show_qr');
     } else {
@@ -142,17 +141,15 @@ export const StudentHome: React.FC = () => {
       
       if (error && error.code === '42P01') {
           console.warn("Table missing, skipping.");
-          submitApplication(); // Fallback
+          submitApplication(); 
           return;
       }
 
       if (profile) {
-        // Profile exists, skip form, submit application directly
         setStudentContact(tempContact);
         localStorage.setItem(LOCAL_STORAGE_CONTACT_KEY, tempContact);
         await submitApplication(tempContact);
       } else {
-        // New profile needed
         setStudentContact(tempContact);
         localStorage.setItem(LOCAL_STORAGE_CONTACT_KEY, tempContact);
         setStep('fill_profile');
@@ -164,7 +161,6 @@ export const StudentHome: React.FC = () => {
     setLoading(false);
   };
 
-  // Step 2: Save Profile -> Then Apply
   const handleProfileSubmit = async () => {
     if (!profileForm.name || !profileForm.school) return alert("请填写必填项");
     setLoading(true);
@@ -177,14 +173,16 @@ export const StudentHome: React.FC = () => {
     setLoading(false);
   };
 
-  // Helper: Create 'applying' order
   const submitApplication = async (contact = studentContact) => {
     if (!selectedJob) return;
     
-    // Check if order exists (e.g. rejected before?) or create new
-    // We assume simplistic flow: insert new 'applying' order
-    // But if we use insert, we might duplicate. Upsert based on job_id+student_contact is better but needs DB constraint.
-    // For now, we will just insert. The UI prevents double clicking usually.
+    // Check for existing order to prevent duplicates if user spams click
+    const existing = orders.find(o => o.job_id === selectedJob.id && o.status !== OrderStatus.REJECTED);
+    if (existing) {
+        alert("您已申请过此职位，请等待审核。");
+        setSelectedJob(null);
+        return;
+    }
     
     const { error } = await supabase.from('orders').insert([{
         job_id: selectedJob.id,
@@ -195,17 +193,15 @@ export const StudentHome: React.FC = () => {
     if (error) {
         alert("申请失败: " + error.message);
     } else {
-        alert("✅ 申请成功！请等待家长确认。\n家长同意后，您将看到付款选项。");
+        alert("✅ 申请成功！\n\n平台将会审核您的简历并人工对接家长。\n如果匹配，我们将通知您进行付款。");
         setSelectedJob(null); // Close modal
         fetchOrders(contact);
     }
   };
 
-  // Step 3: Payment (Only available if status was PARENT_APPROVED)
   const handlePaymentComplete = async () => {
       if (!selectedJob || !studentContact) return;
       
-      // We need to update the EXISTING order, not create new one
       const order = orders.find(o => o.job_id === selectedJob.id);
       if (!order) return;
 
@@ -217,7 +213,7 @@ export const StudentHome: React.FC = () => {
 
       if (error) alert("更新失败: " + error.message);
       else {
-          alert("已确认付款，请等待管理员最终放号。");
+          alert("已确认付款，请等待管理员放号。");
           setSelectedJob(null);
           fetchOrders(studentContact);
       }
@@ -243,18 +239,18 @@ export const StudentHome: React.FC = () => {
       let disabled = false;
 
       if (status === OrderStatus.APPLYING) {
-          btnText = "已申请，等待家长确认...";
+          btnText = "已申请，平台正在对接家长...";
           btnClass = "bg-yellow-100 text-yellow-800";
           disabled = true;
       } else if (status === OrderStatus.PARENT_APPROVED) {
-          btnText = "家长已同意！点击付款获取电话";
+          btnText = "申请通过！点击支付获取电话";
           btnClass = "bg-green-600 text-white animate-pulse shadow-lg shadow-green-200";
       } else if (status === OrderStatus.PAYMENT_PENDING) {
           btnText = "付款确认中，请稍候...";
           btnClass = "bg-blue-100 text-blue-800";
           disabled = true;
       } else if (status === OrderStatus.REJECTED) {
-          btnText = "家长觉得不合适 (已拒绝)";
+          btnText = "不合适 (已结束)";
           btnClass = "bg-gray-100 text-gray-400";
           disabled = true;
       }
@@ -278,7 +274,6 @@ export const StudentHome: React.FC = () => {
           <div className="flex gap-2 items-center">
              {studentContact && <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">{studentContact.slice(-4)}</span>}
              <Link to="/post" className="bg-black text-white text-xs px-3 py-1.5 rounded-full font-bold hover:bg-gray-800 transition-colors">我是家长</Link>
-             <Link to="/parent-login" className="text-xs text-gray-500 hover:text-gray-800 px-1">后台</Link>
           </div>
         </div>
       </header>
@@ -321,14 +316,14 @@ export const StudentHome: React.FC = () => {
 
             {step === 'input_contact' && (
                 <div className="space-y-4">
-                   <p className="text-sm text-gray-600">请输入手机号。家长同意后，您才需要支付信息费。</p>
+                   <p className="text-sm text-gray-600">请输入手机号。匹配成功后，您才需要支付信息费。</p>
                    <input type="text" placeholder="手机号码" className="w-full border p-3 rounded-lg outline-none" value={tempContact} onChange={e=>setTempContact(e.target.value)}/>
                    <button onClick={checkProfileAndNext} disabled={loading} className="w-full bg-blue-600 text-white font-bold py-3 rounded-lg">下一步</button>
                 </div>
             )}
             {step === 'fill_profile' && (
                 <div className="space-y-3">
-                   <p className="text-xs text-yellow-600 bg-yellow-50 p-2 rounded">完善简历让家长更容易选择您。</p>
+                   <p className="text-xs text-yellow-600 bg-yellow-50 p-2 rounded">完善简历让管理员更快为您匹配。</p>
                    <input className="w-full border p-2 rounded text-sm" placeholder="姓名 *" value={profileForm.name} onChange={e=>setProfileForm({...profileForm, name:e.target.value})} />
                    <input className="w-full border p-2 rounded text-sm" placeholder="学校 *" value={profileForm.school} onChange={e=>setProfileForm({...profileForm, school:e.target.value})} />
                    <input className="w-full border p-2 rounded text-sm" placeholder="专业" value={profileForm.major} onChange={e=>setProfileForm({...profileForm, major:e.target.value})} />
@@ -339,7 +334,7 @@ export const StudentHome: React.FC = () => {
             )}
             {step === 'show_qr' && (
                 <div className="text-center space-y-4">
-                   <p className="text-sm text-green-700 font-bold">家长已同意接触！</p>
+                   <p className="text-sm text-green-700 font-bold">匹配成功！</p>
                    <div className="bg-gray-100 p-4 rounded-xl inline-block"><img src="https://picsum.photos/200/200?grayscale" className="w-40 h-40 mix-blend-multiply" /></div>
                    <p className="text-xs text-gray-500">扫码支付 ¥5.00 获取联系电话</p>
                    <button onClick={handlePaymentComplete} disabled={loading} className="w-full bg-green-600 text-white font-bold py-3 rounded-lg">我已付款</button>

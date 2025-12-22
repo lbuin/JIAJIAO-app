@@ -4,36 +4,43 @@ import { supabase, isConfigured } from '../lib/supabaseClient';
 import { Order, Job, OrderStatus, StudentProfile, OrderWithDetails } from '../types';
 import { IconCheck, IconX, IconLock } from '../components/Icons';
 
-type Tab = 'orders' | 'jobs';
+type Tab = 'applications' | 'finance' | 'jobs';
 
 export const AdminMobile: React.FC = () => {
   const navigate = useNavigate();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   
-  const [activeTab, setActiveTab] = useState<Tab>('orders');
-  const [orders, setOrders] = useState<OrderWithDetails[]>([]);
-  const [pendingJobs, setPendingJobs] = useState<Job[]>([]);
+  const [activeTab, setActiveTab] = useState<Tab>('applications');
+
+  // Data Stores
+  const [applications, setApplications] = useState<OrderWithDetails[]>([]); // Status = APPLYING
+  const [payments, setPayments] = useState<OrderWithDetails[]>([]);         // Status = PAYMENT_PENDING
+  const [pendingJobs, setPendingJobs] = useState<Job[]>([]);                // Status = PENDING
   
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // 1. Fetch Orders (PAYMENT_PENDING)
+  // --- Fetch Logic ---
+
+  // 1. Fetch Orders (Both Applications & Payments)
   const fetchOrders = useCallback(async (isBackground = false) => {
     if (!isConfigured()) return;
     if (!isBackground) setLoading(true);
     
-    // CHANGED: Filter by PAYMENT_PENDING instead of generic PENDING
+    // We fetch both relevant statuses
     const { data: ordersData, error: ordersError } = await supabase
       .from('orders')
       .select('*, jobs(*)')
-      .eq('status', OrderStatus.PAYMENT_PENDING) 
+      .in('status', [OrderStatus.APPLYING, OrderStatus.PAYMENT_PENDING])
       .order('created_at', { ascending: true });
 
     if (ordersError) {
       setErrorMsg("订单失败: " + ordersError.message);
     } else {
       const rawOrders = ordersData as unknown as (Order & { jobs: Job })[];
+      
+      // Get Profiles
       const contacts = Array.from(new Set(rawOrders.map(o => o.student_contact)));
       let profilesMap: Record<string, StudentProfile> = {};
       
@@ -42,13 +49,17 @@ export const AdminMobile: React.FC = () => {
         profilesData?.forEach((p: StudentProfile) => profilesMap[p.phone] = p);
       }
       
-      setOrders(rawOrders.map(o => ({ ...o, profile: profilesMap[o.student_contact] })));
+      const enrichedOrders = rawOrders.map(o => ({ ...o, profile: profilesMap[o.student_contact] }));
+      
+      // Split into categories
+      setApplications(enrichedOrders.filter(o => o.status === OrderStatus.APPLYING));
+      setPayments(enrichedOrders.filter(o => o.status === OrderStatus.PAYMENT_PENDING));
     }
     
     if (!isBackground) setLoading(false);
   }, []);
 
-  // 2. Fetch Jobs (Pending)
+  // 2. Fetch Pending Jobs
   const fetchPendingJobs = useCallback(async (isBackground = false) => {
     if (!isConfigured()) return;
     if (!isBackground) setLoading(true);
@@ -60,17 +71,20 @@ export const AdminMobile: React.FC = () => {
         .order('created_at', { ascending: true });
 
     if (error) {
-        if (!error.message.includes('column "status" does not exist')) {
-            setErrorMsg("帖子获取失败: " + error.message);
-        }
+       if (!error.message.includes('column "status" does not exist')) {
+           setErrorMsg("帖子获取失败: " + error.message);
+       }
     } else {
        setPendingJobs(data || []);
     }
+
     if (!isBackground) setLoading(false);
   }, []);
 
+  // Realtime
   useEffect(() => {
     if (!isAuthenticated || !isConfigured()) return;
+    
     fetchOrders();
     fetchPendingJobs();
 
@@ -87,9 +101,23 @@ export const AdminMobile: React.FC = () => {
     else { alert("密码错误"); setPasswordInput(''); }
   };
 
-  const handleOrderAction = async (id: number, status: OrderStatus) => {
-    setOrders(prev => prev.filter(o => o.id !== id));
-    await supabase.from('orders').update({ status }).eq('id', id);
+  // Actions
+  const handleApproveApplication = async (id: number) => {
+      // Set to PARENT_APPROVED -> Triggers Payment UI for student
+      await supabase.from('orders').update({ status: OrderStatus.PARENT_APPROVED }).eq('id', id);
+      setApplications(prev => prev.filter(o => o.id !== id));
+  };
+
+  const handleConfirmPayment = async (id: number) => {
+      // Set to FINAL_APPROVED -> Unlocks info
+      await supabase.from('orders').update({ status: OrderStatus.FINAL_APPROVED }).eq('id', id);
+      setPayments(prev => prev.filter(o => o.id !== id));
+  };
+
+  const handleRejectOrder = async (id: number) => {
+      await supabase.from('orders').update({ status: OrderStatus.REJECTED }).eq('id', id);
+      setApplications(prev => prev.filter(o => o.id !== id));
+      setPayments(prev => prev.filter(o => o.id !== id));
   };
 
   const handleJobAction = async (id: number, action: 'published' | 'rejected') => {
@@ -114,40 +142,106 @@ export const AdminMobile: React.FC = () => {
     <div className="min-h-screen bg-gray-100 pb-20">
       <div className="bg-white px-4 pt-4 pb-2 shadow-sm sticky top-0 z-20">
         <div className="flex justify-between items-center mb-4">
-            <h1 className="text-lg font-bold">审核后台</h1>
-            <div className="flex bg-gray-100 p-1 rounded-lg">
-                <button onClick={() => setActiveTab('orders')} className={`px-3 py-1 text-xs font-bold rounded ${activeTab === 'orders' ? 'bg-white shadow' : 'text-gray-500'}`}>资金 ({orders.length})</button>
-                <button onClick={() => setActiveTab('jobs')} className={`px-3 py-1 text-xs font-bold rounded ${activeTab === 'jobs' ? 'bg-white shadow' : 'text-gray-500'}`}>帖子 ({pendingJobs.length})</button>
+            <h1 className="text-lg font-bold">后台管理</h1>
+            <div className="text-xs text-gray-400 flex items-center gap-1">
+                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> 在线
             </div>
+        </div>
+        
+        {/* Tabs */}
+        <div className="flex bg-gray-100 p-1 rounded-lg">
+            <button 
+                onClick={() => setActiveTab('applications')}
+                className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${activeTab === 'applications' ? 'bg-white shadow text-black' : 'text-gray-500'}`}
+            >
+                新申请 ({applications.length})
+            </button>
+            <button 
+                onClick={() => setActiveTab('finance')}
+                className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${activeTab === 'finance' ? 'bg-white shadow text-black' : 'text-gray-500'}`}
+            >
+                待收款 ({payments.length})
+            </button>
+            <button 
+                onClick={() => setActiveTab('jobs')}
+                className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${activeTab === 'jobs' ? 'bg-white shadow text-black' : 'text-gray-500'}`}
+            >
+                新帖子 ({pendingJobs.length})
+            </button>
         </div>
       </div>
 
       <div className="p-4 space-y-4">
         {errorMsg && <div className="bg-red-50 text-red-600 p-4 rounded-xl text-sm">{errorMsg}</div>}
 
-        {activeTab === 'orders' && (
-             orders.length === 0 ? <p className="text-center text-gray-400 mt-10">暂无待确认收款订单</p> :
-             orders.map(order => (
+        {/* --- TAB 1: APPLICATIONS (Intermediary Mode) --- */}
+        {activeTab === 'applications' && (
+             applications.length === 0 ? <p className="text-center text-gray-400 mt-10">暂无新申请</p> :
+             applications.map(order => (
                 <div key={order.id} className="bg-white rounded-2xl shadow-sm p-5 border border-gray-100">
+                    {/* Header */}
+                    <div className="flex justify-between items-start mb-3">
+                        <span className="bg-yellow-100 text-yellow-800 text-[10px] font-bold px-2 py-0.5 rounded-full">需对接家长</span>
+                        <span className="text-xs text-gray-400">#{order.id}</span>
+                    </div>
+
+                    {/* Student Info */}
                     <div className="mb-4">
-                        <div className="flex justify-between items-start">
-                            <span className="text-lg font-bold">{order.profile?.name || order.student_contact}</span>
-                            <span className="text-xs text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded">已支付待放号</span>
-                        </div>
-                        {order.profile && <div className="text-xs text-gray-500 mt-1">{order.profile.school} · {order.profile.major}</div>}
+                        <div className="font-bold text-lg">{order.profile?.name || order.student_contact}</div>
+                        <div className="text-sm text-gray-500">{order.profile?.school} · {order.profile?.major} · {order.profile?.grade}</div>
+                        {order.profile?.experience && (
+                            <div className="mt-2 text-xs bg-gray-50 p-2 rounded text-gray-600 border border-gray-100">
+                                {order.profile.experience}
+                            </div>
+                        )}
                     </div>
-                    <div className="bg-orange-50 p-3 rounded-lg border border-orange-100 mb-4">
-                        <div className="text-sm text-orange-900">{order.jobs?.title}</div>
-                        <div className="text-xs text-orange-600 mt-1">{order.jobs?.price}</div>
+
+                    {/* Job Info (Parent Contact) */}
+                    <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 mb-4">
+                        <div className="text-[10px] text-blue-800 font-bold uppercase mb-1">对接目标 (家长)</div>
+                        <div className="text-sm font-bold text-blue-900">{order.jobs?.contact_name}</div>
+                        <div className="text-lg font-mono text-blue-700 select-all">{order.jobs?.contact_phone}</div>
+                        <div className="text-xs text-blue-600 mt-1">{order.jobs?.title} ({order.jobs?.price})</div>
                     </div>
+
+                    {/* Actions */}
                     <div className="grid grid-cols-2 gap-3">
-                        <button onClick={() => handleOrderAction(order.id, OrderStatus.REJECTED)} className="py-2 bg-red-50 text-red-600 rounded-lg font-bold text-sm">拒绝</button>
-                        <button onClick={() => handleOrderAction(order.id, OrderStatus.FINAL_APPROVED)} className="py-2 bg-green-500 text-white rounded-lg font-bold text-sm">确认收款并放号</button>
+                        <button onClick={() => handleRejectOrder(order.id)} className="py-2 bg-red-50 text-red-600 rounded-lg font-bold text-sm">不合适</button>
+                        <button onClick={() => handleApproveApplication(order.id)} className="py-2 bg-black text-white rounded-lg font-bold text-sm shadow-md">
+                            允许付款
+                        </button>
                     </div>
                 </div>
              ))
         )}
 
+        {/* --- TAB 2: FINANCE (Payment Pending) --- */}
+        {activeTab === 'finance' && (
+             payments.length === 0 ? <p className="text-center text-gray-400 mt-10">暂无待确认收款</p> :
+             payments.map(order => (
+                <div key={order.id} className="bg-white rounded-2xl shadow-sm p-5 border border-gray-100">
+                    <div className="flex justify-between items-center mb-4">
+                        <span className="bg-green-100 text-green-800 text-[10px] font-bold px-2 py-0.5 rounded-full">已支付</span>
+                        <span className="text-xs text-gray-400">#{order.id}</span>
+                    </div>
+
+                    <div className="mb-4">
+                        <div className="font-bold text-gray-800">{order.profile?.name || order.student_contact}</div>
+                        <div className="text-sm text-gray-500">申请: {order.jobs?.title}</div>
+                        <div className="text-xs text-gray-400 mt-1">学生电话: {order.student_contact}</div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                        <button onClick={() => handleRejectOrder(order.id)} className="py-2 bg-red-50 text-red-600 rounded-lg font-bold text-sm">驳回</button>
+                        <button onClick={() => handleConfirmPayment(order.id)} className="py-2 bg-green-500 text-white rounded-lg font-bold text-sm shadow-green-200 shadow-md">
+                            确认收款并放号
+                        </button>
+                    </div>
+                </div>
+             ))
+        )}
+
+        {/* --- TAB 3: JOBS (New Posts) --- */}
         {activeTab === 'jobs' && (
              pendingJobs.length === 0 ? <p className="text-center text-gray-400 mt-10">暂无待审核帖子</p> :
              pendingJobs.map(job => (

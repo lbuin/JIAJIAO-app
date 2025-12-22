@@ -7,21 +7,19 @@ export interface Job {
   address: string;
   contact_name: string;
   contact_phone: string;
-  manage_password?: string; // New field for parent login
+  manage_password?: string; // Optional/Deprecated
   is_active: boolean;
   status?: 'pending' | 'published' | 'rejected';
   created_at?: string;
 }
 
-// Updated statuses for the new workflow
 export enum OrderStatus {
-  APPLYING = 'applying',               // Student applied, waiting for parent
-  PARENT_APPROVED = 'parent_approved', // Parent said OK, waiting for payment
-  REJECTED = 'rejected',               // Parent or Admin said No
-  PAYMENT_PENDING = 'payment_pending', // Student paid, waiting for Admin
+  APPLYING = 'applying',               // Student applied, waiting for Admin to check with Parent
+  PARENT_APPROVED = 'parent_approved', // Admin confirmed with Parent, allowed Student to pay
+  REJECTED = 'rejected',               // Admin rejected
+  PAYMENT_PENDING = 'payment_pending', // Student paid, waiting for Admin to release info
   FINAL_APPROVED = 'final_approved',   // Admin released contact info
   
-  // Keep old ones for backward compatibility if needed, though logic will shift
   PENDING = 'pending', 
   APPROVED = 'approved',
 }
@@ -58,5 +56,5 @@ export interface CreateJobParams {
   address: string;
   contact_name: string;
   contact_phone: string;
-  manage_password?: string; // New
+  // manage_password removed
 }
