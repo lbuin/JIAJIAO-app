@@ -1,22 +1,23 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { supabase, isConfigured, setupSupabase } from '../lib/supabaseClient';
 import { Job, Order, OrderStatus, StudentProfile, OrderWithDetails } from '../types';
-import { IconX, IconArrowLeft, IconLock } from '../components/Icons';
+import { IconX, IconLock, IconHome, IconClipboard, IconUserPlus } from '../components/Icons';
 
 const LOCAL_STORAGE_CONTACT_KEY = 'tutor_match_student_contact';
 
 type Step = 'input_contact' | 'fill_profile' | 'show_qr';
 type PaymentMethod = 'wechat' | 'alipay';
+type Tab = 'market' | 'orders';
 
 const WECHAT_QR = "/wechat-pay.jpg"; 
 const ALIPAY_QR = "/alipay.jpg";      
 const CUSTOMER_SERVICE_QQ = "1400470321";
 
 export const StudentHome: React.FC = () => {
+  const navigate = useNavigate();
   const [jobs, setJobs] = useState<Job[]>([]);
-  // Use OrderWithDetails to include the Job info inside the Order
   const [orders, setOrders] = useState<OrderWithDetails[]>([]);
   
   const [loading, setLoading] = useState(true);
@@ -25,6 +26,9 @@ export const StudentHome: React.FC = () => {
   const [configUrl, setConfigUrl] = useState('');
   const [configKey, setConfigKey] = useState('');
   
+  // Navigation State
+  const [activeTab, setActiveTab] = useState<Tab>('market');
+
   // Identity
   const [studentContact, setStudentContact] = useState<string>(() => {
     return localStorage.getItem(LOCAL_STORAGE_CONTACT_KEY) || '';
@@ -53,11 +57,10 @@ export const StudentHome: React.FC = () => {
   const fetchJobs = useCallback(async () => {
     setErrorMsg(null);
     try {
-      // 1. Fetch Available Jobs (Marketplace)
       const { data, error } = await supabase
         .from('jobs')
         .select('*')
-        .eq('status', 'published') // CRITICAL: Only show published jobs to general public
+        .eq('status', 'published') 
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -71,10 +74,9 @@ export const StudentHome: React.FC = () => {
   const fetchOrders = useCallback(async (contact: string) => {
     if (!contact) return;
     try {
-      // 2. Fetch User's Orders (History) - Includes TAKEN jobs that belong to this user
       const { data } = await supabase
         .from('orders')
-        .select('*, jobs(*)') // Join jobs data
+        .select('*, jobs(*)') 
         .eq('student_contact', contact)
         .order('created_at', { ascending: false });
       
@@ -83,16 +85,6 @@ export const StudentHome: React.FC = () => {
       console.error(err);
     }
   }, []);
-
-  const handleSaveConfig = async () => {
-    if (!configUrl || !configKey) return alert("请输入配置");
-    setupSupabase(configUrl, configKey);
-    setConfigured(true);
-    setLoading(true);
-    await fetchJobs();
-    if (studentContact) await fetchOrders(studentContact);
-    setLoading(false);
-  };
 
   const handleLogout = () => {
     if (confirm("确定要切换账号吗？")) {
@@ -157,7 +149,6 @@ export const StudentHome: React.FC = () => {
   };
 
   const handleJobAction = (job: Job) => {
-    // Check if we have an order for this specific job in the orders list
     const order = orders.find(o => o.job_id === job.id);
     const status = order?.status;
 
@@ -208,7 +199,7 @@ export const StudentHome: React.FC = () => {
     if (!selectedJob) return;
     const existing = orders.find(o => o.job_id === selectedJob.id && o.status !== OrderStatus.REJECTED);
     if (existing) {
-        alert("已申请过此职位，请查看上方'我的订单'。");
+        alert("已申请过此职位，请查看'我的订单'。");
         setSelectedJob(null);
         return;
     }
@@ -223,6 +214,8 @@ export const StudentHome: React.FC = () => {
         alert("✅ 申请成功！请等待审核。");
         setSelectedJob(null);
         fetchOrders(contact);
+        // Optional: switch tab to orders to show feedback
+        // setActiveTab('orders'); 
     }
   };
 
@@ -304,13 +297,12 @@ export const StudentHome: React.FC = () => {
       );
   };
 
-  // Filter logic: Exclude jobs user has already applied for from the main list, 
-  // because they are shown in "My Orders" section.
+  // Filter logic
   const appliedJobIds = new Set(orders.map(o => o.job_id));
   const marketplaceJobs = jobs.filter(j => !appliedJobIds.has(j.id));
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-20">
+    <div className="min-h-screen bg-gray-50 pb-24">
       <header className="bg-white shadow-sm sticky top-0 z-10">
         <div className="max-w-2xl mx-auto px-4 h-16 flex items-center justify-between">
           <h1 className="text-xl font-bold text-gray-800 tracking-tight">合工大家教平台</h1>
@@ -321,7 +313,7 @@ export const StudentHome: React.FC = () => {
                     <button onClick={handleLogout} className="bg-gray-200 hover:bg-gray-300 rounded-full p-1 w-5 h-5 flex items-center justify-center"><IconX className="w-3 h-3" /></button>
                 </div>
              ) : <span className="text-xs text-gray-400">未登录</span>}
-             <Link to="/post" className="bg-black text-white text-xs px-3 py-1.5 rounded-full font-bold">我是家长</Link>
+             {/* "I am parent" link removed from here */}
           </div>
         </div>
       </header>
@@ -329,70 +321,116 @@ export const StudentHome: React.FC = () => {
       <main className="max-w-2xl mx-auto px-4 py-6 space-y-8">
         {(!configured || errorMsg) && <div className="text-red-500 text-center text-sm">{errorMsg || "需配置数据库"}</div>}
         
-        {/* SECTION 1: MY ORDERS (HISTORY) */}
-        {studentContact && orders.length > 0 && (
-            <section>
-                <h2 className="text-sm font-bold text-gray-500 mb-3 px-1 uppercase tracking-wider">我的申请 / 订单</h2>
-                <div className="space-y-4">
-                    {orders.map(order => {
-                        // Guard against deleted jobs
-                        if (!order.jobs) return null; 
-                        return (
-                            <div key={order.id} className="relative">
-                                {/* Badge for Taken Jobs that are invisible to others */}
-                                {order.jobs.status === 'taken' && (
-                                    <div className="absolute -top-2 -right-2 bg-gray-800 text-white text-[10px] px-2 py-0.5 rounded-full z-10 shadow-sm">
-                                        已接单 (仅自己可见)
-                                    </div>
-                                )}
-                                <JobContent job={order.jobs} orderStatus={order.status} />
-                            </div>
-                        );
-                    })}
+        {/* --- TAB 1: MARKETPLACE --- */}
+        {activeTab === 'market' && (
+            <section className="animate-fade-in">
+                <h2 className="text-sm font-bold text-gray-500 mb-3 px-1 uppercase tracking-wider flex justify-between items-center">
+                    <span>最新家教需求</span>
+                    <span className="text-xs font-normal text-gray-400">{marketplaceJobs.length} 个职位</span>
+                </h2>
+                
+                {configured && loading && !errorMsg ? <div className="text-center text-gray-400 py-10">加载中...</div> : (
+                    <div className="space-y-4">
+                        {marketplaceJobs.map(job => (
+                            <JobContent key={job.id} job={job} />
+                        ))}
+                        {marketplaceJobs.length === 0 && <div className="text-center text-gray-400 py-16 bg-white rounded-xl border border-dashed border-gray-200">暂无更多新需求</div>}
+                    </div>
+                )}
+                
+                 <div className="mt-12 text-center">
+                    <Link to="/my-secret-admin-888" className="text-xs text-gray-300 hover:text-gray-500">管理员入口</Link>
                 </div>
             </section>
         )}
 
-        {/* SECTION 2: MARKETPLACE */}
-        <section>
-            <h2 className="text-sm font-bold text-gray-500 mb-3 px-1 uppercase tracking-wider flex justify-between items-center">
-                <span>最新家教需求</span>
-                <span className="text-xs font-normal text-gray-400">{marketplaceJobs.length} 个职位</span>
-            </h2>
-            
-            {configured && loading && !errorMsg ? <div className="text-center text-gray-400 py-10">加载中...</div> : (
-                <div className="space-y-4">
-                    {marketplaceJobs.map(job => (
-                        <JobContent key={job.id} job={job} />
-                    ))}
-                    {marketplaceJobs.length === 0 && <div className="text-center text-gray-400 py-8 bg-white rounded-xl border border-dashed border-gray-200">暂无更多新需求</div>}
-                </div>
-            )}
-        </section>
+        {/* --- TAB 2: MY ORDERS --- */}
+        {activeTab === 'orders' && (
+            <section className="animate-fade-in">
+                <h2 className="text-sm font-bold text-gray-500 mb-3 px-1 uppercase tracking-wider">我的申请 / 订单</h2>
+                
+                {!studentContact ? (
+                    <div className="text-center py-20 text-gray-500 bg-white rounded-xl border border-dashed">
+                        <p>请输入手机号或申请一个职位来查看订单</p>
+                    </div>
+                ) : orders.length === 0 ? (
+                    <div className="text-center py-20 text-gray-400 bg-white rounded-xl border border-dashed">
+                        暂无申请记录，快去“找家教”看看吧
+                    </div>
+                ) : (
+                    <div className="space-y-4">
+                        {orders.map(order => {
+                            if (!order.jobs) return null; 
+                            return (
+                                <div key={order.id} className="relative">
+                                    {order.jobs.status === 'taken' && (
+                                        <div className="absolute -top-2 -right-2 bg-gray-800 text-white text-[10px] px-2 py-0.5 rounded-full z-10 shadow-sm">
+                                            已接单 (仅自己可见)
+                                        </div>
+                                    )}
+                                    <JobContent job={order.jobs} orderStatus={order.status} />
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
 
-        {/* CUSTOMER SERVICE SECTION */}
-        <div className="bg-white rounded-xl p-4 shadow-sm border border-blue-100 flex items-center justify-between">
-             <div className="flex flex-col">
-                <span className="font-bold text-gray-800 text-sm">需要帮助？</span>
-                <span className="text-xs text-gray-500 mt-1">审核催单 / 支付问题 / 咨询</span>
-             </div>
-             <div className="text-right">
-                <a href={`mqqwpa://im/chat?chat_type=wpa&uin=${CUSTOMER_SERVICE_QQ}&version=1&src_type=web`} className="text-blue-600 font-bold font-mono text-lg block select-all">
-                    {CUSTOMER_SERVICE_QQ}
-                </a>
-                <span className="text-[10px] text-gray-400">点击复制客服 QQ</span>
-             </div>
-        </div>
-        
-        <div className="mt-8 text-center">
-            <Link to="/my-secret-admin-888" className="text-xs text-gray-300 hover:text-gray-500">管理员入口</Link>
-        </div>
+                {/* CUSTOMER SERVICE SECTION (Visible only in Orders tab now to reduce clutter on home) */}
+                <div className="mt-8 bg-white rounded-xl p-4 shadow-sm border border-blue-100 flex items-center justify-between">
+                    <div className="flex flex-col">
+                        <span className="font-bold text-gray-800 text-sm">需要帮助？</span>
+                        <span className="text-xs text-gray-500 mt-1">审核催单 / 支付问题 / 咨询</span>
+                    </div>
+                    <div className="text-right">
+                        <a href={`mqqwpa://im/chat?chat_type=wpa&uin=${CUSTOMER_SERVICE_QQ}&version=1&src_type=web`} className="text-blue-600 font-bold font-mono text-lg block select-all">
+                            {CUSTOMER_SERVICE_QQ}
+                        </a>
+                        <span className="text-[10px] text-gray-400">点击复制客服 QQ</span>
+                    </div>
+                </div>
+            </section>
+        )}
       </main>
 
-      {/* MODAL (Unchanged logic, just simplified XML) */}
+      {/* BOTTOM NAVIGATION BAR */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 pb-safe shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-40">
+        <div className="max-w-2xl mx-auto flex">
+            {/* 1. Find Tutor (Home) */}
+            <button 
+                onClick={() => setActiveTab('market')}
+                className={`flex-1 py-3 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all ${activeTab === 'market' ? 'text-black' : 'text-gray-400'}`}
+            >
+                <IconHome className={`w-6 h-6 ${activeTab === 'market' ? 'fill-gray-100' : ''}`} />
+                <span className="text-[10px] font-bold">找家教</span>
+            </button>
+            
+            {/* 2. Find Teacher (Parent Entrance) */}
+            <button 
+                onClick={() => navigate('/post')}
+                className="flex-1 py-3 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all text-gray-400 hover:text-blue-600"
+            >
+                <IconUserPlus className="w-6 h-6" />
+                <span className="text-[10px] font-bold">找老师</span>
+            </button>
+
+            {/* 3. My Orders */}
+            <button 
+                onClick={() => setActiveTab('orders')}
+                className={`flex-1 py-3 flex flex-col items-center justify-center gap-1 active:scale-95 transition-all relative ${activeTab === 'orders' ? 'text-black' : 'text-gray-400'}`}
+            >
+                <IconClipboard className={`w-6 h-6 ${activeTab === 'orders' ? 'fill-gray-100' : ''}`} />
+                <span className="text-[10px] font-bold">我的订单</span>
+                {orders.length > 0 && (
+                    <span className="absolute top-2 right-[30%] w-2 h-2 bg-red-500 rounded-full border border-white"></span>
+                )}
+            </button>
+        </div>
+      </div>
+
+      {/* MODAL (Content unchanged) */}
       {selectedJob && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl p-6 relative">
+          <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl p-6 relative animate-scale-up">
             <button onClick={() => setSelectedJob(null)} className="absolute top-4 right-4 text-gray-400"><IconX/></button>
             <h3 className="font-bold text-lg text-gray-800 mb-4">
                 {step === 'input_contact' ? '申请接单' : step === 'fill_profile' ? '完善简历' : '支付信息费'}
