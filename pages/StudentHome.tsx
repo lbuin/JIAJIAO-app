@@ -10,10 +10,10 @@ const LOCAL_STORAGE_CONTACT_KEY = 'tutor_match_student_contact';
 type Step = 'input_contact' | 'fill_profile' | 'show_qr';
 type PaymentMethod = 'wechat' | 'alipay';
 
-// --- 使用 jsDelivr CDN 加速 GitHub 图片，确保国内秒开 ---
-// 格式: https://cdn.jsdelivr.net/gh/用户名/仓库名@分支名/文件路径
-const WECHAT_QR = "https://cdn.jsdelivr.net/gh/lbuin/JIAJIAO-app@main/163d0a18aa6260eaa1cabf21c2443afa.jpg"; 
-const ALIPAY_QR = "https://cdn.jsdelivr.net/gh/lbuin/JIAJIAO-app@main/39fa725bde6f1aaa2665d3fa68edd91f.jpg";      
+// --- 静态资源引用 (最稳健方案) ---
+// 图片文件将直接从项目的 public 文件夹读取，不依赖任何外部网络
+const WECHAT_QR = "/wechat-pay.jpg"; 
+const ALIPAY_QR = "/alipay.jpg";      
 
 export const StudentHome: React.FC = () => {
   const [jobs, setJobs] = useState<Job[]>([]);
