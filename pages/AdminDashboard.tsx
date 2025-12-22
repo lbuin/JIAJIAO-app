@@ -2,8 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase, isConfigured, setupSupabase } from '../lib/supabaseClient';
 import { Job, Order, OrderStatus } from '../types';
-import { generateJobDetails } from '../lib/geminiService';
-import { IconCheck, IconX, IconSparkles, IconArrowLeft } from '../components/Icons';
+import { IconCheck, IconX, IconArrowLeft } from '../components/Icons';
 
 const SETUP_SQL = `
 -- 1. Create Jobs Table
@@ -47,14 +46,12 @@ export const AdminDashboard: React.FC = () => {
   const [newJob, setNewJob] = useState({
     grade: '',
     subject: '',
-    requirements: '',
     title: '',
     price: '',
     address: '',
     contact_name: '管理员',
     contact_phone: ''
   });
-  const [isGenerating, setIsGenerating] = useState(false);
 
   useEffect(() => {
     setConfigUrl(localStorage.getItem('VITE_SUPABASE_URL') || '');
@@ -125,21 +122,12 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  const handleGenerateAI = async () => {
-    if (!newJob.grade || !newJob.subject) return alert("请先输入年级和科目");
-    
-    setIsGenerating(true);
-    const result = await generateJobDetails(newJob.grade, newJob.subject, newJob.requirements);
-    
-    setNewJob(prev => ({
-      ...prev,
-      title: result.title,
-      price: result.priceSuggestion
-    }));
-    setIsGenerating(false);
-  };
-
   const handleCreateJob = async () => {
+    // Basic validation
+    if (!newJob.title || !newJob.contact_phone) {
+        return alert("请至少填写职位标题和联系电话");
+    }
+
     const { error } = await supabase.from('jobs').insert([{
       title: newJob.title,
       grade: newJob.grade,
@@ -155,7 +143,7 @@ export const AdminDashboard: React.FC = () => {
     else {
       alert("需求发布成功！");
       setNewJob({
-        grade: '', subject: '', requirements: '', title: '', price: '', address: '', contact_name: '管理员', contact_phone: ''
+        grade: '', subject: '', title: '', price: '', address: '', contact_name: '管理员', contact_phone: ''
       });
     }
   };
@@ -279,41 +267,58 @@ export const AdminDashboard: React.FC = () => {
           )}
         </section>
 
-        {/* Section 2: Create New Job (With AI) */}
+        {/* Section 2: Create New Job (Manual) */}
         {!isMissingTables && (
-        <section className="bg-white rounded-xl shadow p-6 border border-indigo-100">
-           <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-             <IconSparkles className="text-indigo-500" />
+        <section className="bg-white rounded-xl shadow p-6 border border-gray-100">
+           <h2 className="text-xl font-bold text-gray-800 mb-6">
              发布新需求
            </h2>
            
-           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-             <input className="border p-2 rounded" placeholder="年级 (如: 高一)" value={newJob.grade} onChange={e => setNewJob({...newJob, grade: e.target.value})} />
-             <input className="border p-2 rounded" placeholder="科目 (如: 数学)" value={newJob.subject} onChange={e => setNewJob({...newJob, subject: e.target.value})} />
-             <textarea className="border p-2 rounded md:col-span-2" placeholder="额外要求/备注 (AI 辅助生成，可选)" value={newJob.requirements} onChange={e => setNewJob({...newJob, requirements: e.target.value})} />
-           </div>
-
-           <button 
-             onClick={handleGenerateAI}
-             disabled={isGenerating}
-             className="mb-6 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2"
-           >
-             {isGenerating ? 'AI 正在思考...' : '使用 AI 生成详情'}
-           </button>
-
-           <div className="space-y-4 border-t pt-4">
-             <input className="w-full border p-2 rounded font-bold" placeholder="职位标题" value={newJob.title} onChange={e => setNewJob({...newJob, title: e.target.value})} />
-             <div className="grid grid-cols-2 gap-4">
-               <input className="border p-2 rounded" placeholder="价格建议" value={newJob.price} onChange={e => setNewJob({...newJob, price: e.target.value})} />
-               <input className="border p-2 rounded" placeholder="地址" value={newJob.address} onChange={e => setNewJob({...newJob, address: e.target.value})} />
+           <div className="space-y-4">
+             {/* Row 1 */}
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">年级</label>
+                  <input className="w-full border p-2 rounded" placeholder="如: 高一" value={newJob.grade} onChange={e => setNewJob({...newJob, grade: e.target.value})} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">科目</label>
+                  <input className="w-full border p-2 rounded" placeholder="如: 数学" value={newJob.subject} onChange={e => setNewJob({...newJob, subject: e.target.value})} />
+                </div>
              </div>
-             <div className="grid grid-cols-2 gap-4">
-                <input className="border p-2 rounded" placeholder="联系人称呼" value={newJob.contact_name} onChange={e => setNewJob({...newJob, contact_name: e.target.value})} />
-                <input className="border p-2 rounded" placeholder="联系电话" value={newJob.contact_phone} onChange={e => setNewJob({...newJob, contact_phone: e.target.value})} />
+
+             {/* Row 2 */}
+             <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">职位标题 (展示给学生看)</label>
+                <input className="w-full border p-2 rounded font-medium" placeholder="如: 高一数学辅导，周末上课" value={newJob.title} onChange={e => setNewJob({...newJob, title: e.target.value})} />
+             </div>
+
+             {/* Row 3 */}
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+               <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">价格建议</label>
+                  <input className="w-full border p-2 rounded" placeholder="如: ¥150/小时" value={newJob.price} onChange={e => setNewJob({...newJob, price: e.target.value})} />
+               </div>
+               <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">地址/区域</label>
+                  <input className="w-full border p-2 rounded" placeholder="如: 朝阳区大悦城附近" value={newJob.address} onChange={e => setNewJob({...newJob, address: e.target.value})} />
+               </div>
+             </div>
+
+             {/* Row 4 */}
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg border border-gray-100">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">联系人</label>
+                  <input className="w-full border p-2 rounded" placeholder="如: 王老师" value={newJob.contact_name} onChange={e => setNewJob({...newJob, contact_name: e.target.value})} />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">联系电话 (学生付费后可见)</label>
+                  <input className="w-full border p-2 rounded" placeholder="如: 13800138000" value={newJob.contact_phone} onChange={e => setNewJob({...newJob, contact_phone: e.target.value})} />
+                </div>
              </div>
              
-             <button onClick={handleCreateJob} className="w-full bg-gray-900 text-white py-3 rounded-lg hover:bg-black">
-               发布需求
+             <button onClick={handleCreateJob} className="w-full bg-black text-white py-3 rounded-lg hover:bg-gray-800 transition-colors font-semibold mt-2">
+               立即发布
              </button>
            </div>
         </section>
