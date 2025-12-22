@@ -92,6 +92,15 @@ export const StudentHome: React.FC = () => {
     setLoading(false);
   };
 
+  const handleLogout = () => {
+    if (confirm("确定要切换账号吗？")) {
+      localStorage.removeItem(LOCAL_STORAGE_CONTACT_KEY);
+      setStudentContact('');
+      setOrders([]); // Clear orders from view
+      window.location.reload(); // Reload to ensure clean state
+    }
+  };
+
   useEffect(() => {
     const init = async () => {
       if (!isConfigured()) { setLoading(false); return; }
@@ -272,14 +281,48 @@ export const StudentHome: React.FC = () => {
         <div className="max-w-2xl mx-auto px-4 h-16 flex items-center justify-between">
           <h1 className="text-xl font-bold text-gray-800 tracking-tight">家教信息平台</h1>
           <div className="flex gap-2 items-center">
-             {studentContact && <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">{studentContact.slice(-4)}</span>}
+             {studentContact ? (
+                <div className="flex items-center bg-gray-100 rounded-full pl-3 pr-1 py-1">
+                    <span className="text-xs text-gray-500 mr-2">{studentContact.slice(-4)}</span>
+                    <button onClick={handleLogout} className="bg-gray-200 hover:bg-gray-300 text-gray-600 rounded-full p-1 w-5 h-5 flex items-center justify-center text-[10px]">
+                        <IconX className="w-3 h-3" />
+                    </button>
+                </div>
+             ) : (
+                <span className="text-xs text-gray-400">未登录</span>
+             )}
              <Link to="/post" className="bg-black text-white text-xs px-3 py-1.5 rounded-full font-bold hover:bg-gray-800 transition-colors">我是家长</Link>
           </div>
         </div>
       </header>
 
       <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
-        {showConfigForm(configured, errorMsg, setConfigUrl, setConfigKey, handleSaveConfig)}
+        {(!configured || errorMsg) && (
+             <div className="mb-6 bg-red-50 text-red-700 p-4 rounded-lg border border-red-200">
+               <p className="font-bold mb-2">
+                 {!configured ? '需要配置 Supabase' : `错误: ${errorMsg}`}
+               </p>
+               <div className="bg-white p-3 rounded border border-red-100 mt-2">
+                 <p className="text-xs text-gray-500 mb-2">Supabase 凭据</p>
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <input 
+                      className="border p-2 rounded text-sm" 
+                      placeholder="Supabase URL" 
+                      value={configUrl} 
+                      onChange={e => setConfigUrl(e.target.value)} 
+                    />
+                    <input 
+                      className="border p-2 rounded text-sm" 
+                      type="password" 
+                      placeholder="Anon Key" 
+                      value={configKey} 
+                      onChange={e => setConfigKey(e.target.value)} 
+                    />
+                 </div>
+                 <button onClick={handleSaveConfig} className="mt-2 text-xs bg-red-600 text-white px-3 py-1 rounded">保存并重试</button>
+               </div>
+             </div>
+        )}
         
         {configured && loading && !errorMsg ? <div className="text-center text-gray-400 py-10">加载中...</div> : 
          jobs.map(job => (
@@ -346,17 +389,3 @@ export const StudentHome: React.FC = () => {
     </div>
   );
 };
-
-// Helper for config form UI to keep main component clean
-const showConfigForm = (configured: boolean, errorMsg: string|null, setUrl: any, setKey: any, handleSave: any) => {
-    if (configured && !errorMsg) return null;
-    return (
-        <div className="bg-white border border-red-200 rounded-xl shadow-lg p-6 mb-4">
-            <h3 className="font-bold text-red-700 mb-2">连接配置</h3>
-            <p className="text-sm text-gray-600 mb-4">{errorMsg || "请输入 Supabase 连接信息"}</p>
-            <input className="w-full border p-2 rounded mb-2 text-sm" placeholder="URL" onChange={e=>setUrl(e.target.value)}/>
-            <input type="password" className="w-full border p-2 rounded mb-4 text-sm" placeholder="Key" onChange={e=>setKey(e.target.value)}/>
-            <button onClick={handleSave} className="w-full bg-red-600 text-white font-bold py-2 rounded">连接</button>
-        </div>
-    )
-}
