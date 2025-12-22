@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase, isConfigured, setupSupabase } from '../lib/supabaseClient';
 import { Job, Order, OrderStatus } from '../types';
@@ -59,29 +59,13 @@ export const AdminDashboard: React.FC = () => {
     setConfigured(isConfigured());
   }, []);
 
-  const handleSaveConfig = () => {
-    const url = configUrl.trim();
-    const key = configKey.trim();
-
-    if (!url || !key) return alert("请输入 URL 和 Key");
-
-    try {
-      new URL(url);
-    } catch (e) {
-      return alert("URL 格式无效。请输入以 https:// 开头的有效地址");
-    }
-
-    setupSupabase(url, key);
-    setConfigured(true);
-    fetchPendingOrders();
-  };
-
-  const fetchPendingOrders = async () => {
+  const fetchPendingOrders = useCallback(async (isBackground = false) => {
     if (!isConfigured()) {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    
+    if (!isBackground) setLoading(true);
     setErrorMsg(null);
     try {
       const { data, error } = await supabase
@@ -100,16 +84,54 @@ export const AdminDashboard: React.FC = () => {
         console.error("Network error fetching orders:", err);
         setErrorMsg(err.message || "Failed to fetch orders");
     }
-    setLoading(false);
+    
+    if (!isBackground) setLoading(false);
+  }, []);
+
+  const handleSaveConfig = () => {
+    const url = configUrl.trim();
+    const key = configKey.trim();
+
+    if (!url || !key) return alert("请输入 URL 和 Key");
+
+    try {
+      new URL(url);
+    } catch (e) {
+      return alert("URL 格式无效。请输入以 https:// 开头的有效地址");
+    }
+
+    setupSupabase(url, key);
+    setConfigured(true);
+    fetchPendingOrders();
   };
 
+  // Initial Load & Realtime
   useEffect(() => {
     if (configured) {
         fetchPendingOrders();
+
+        const channel = supabase
+          .channel('admin_dashboard_realtime')
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'orders' },
+            (payload) => {
+              console.log('Admin Dashboard: Realtime update', payload);
+              fetchPendingOrders(true);
+            }
+          )
+          .subscribe();
+
+        return () => {
+          supabase.removeChannel(channel);
+        };
     }
-  }, [configured]);
+  }, [configured, fetchPendingOrders]);
 
   const handleUpdateStatus = async (orderId: number, status: OrderStatus) => {
+    // Optimistic Update
+    setOrders(prev => prev.filter(o => o.id !== orderId));
+
     const { error } = await supabase
       .from('orders')
       .update({ status })
@@ -117,8 +139,7 @@ export const AdminDashboard: React.FC = () => {
 
     if (error) {
       alert("更新失败: " + error.message);
-    } else {
-      setOrders(prev => prev.filter(o => o.id !== orderId));
+      fetchPendingOrders(true); // Revert
     }
   };
 
@@ -163,13 +184,20 @@ export const AdminDashboard: React.FC = () => {
            </Link>
            <h1 className="text-xl text-gray-400">|</h1>
            <h1 className="text-xl font-bold text-gray-800">后台管理看板</h1>
+           <div className="ml-auto flex items-center gap-2 px-3 py-1 bg-white rounded-full text-xs text-gray-500 shadow-sm border border-gray-100">
+               <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+               </span>
+               数据实时同步中
+           </div>
         </div>
 
         {/* Section 1: Pending Orders / Errors */}
         <section className="bg-white rounded-xl shadow p-6">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-2xl font-bold text-gray-800">待审核订单</h2>
-            <button onClick={fetchPendingOrders} className="text-blue-600 text-sm hover:underline">刷新</button>
+            <button onClick={() => fetchPendingOrders()} className="text-blue-600 text-sm hover:underline">刷新</button>
           </div>
           
           {showConfigForm && (

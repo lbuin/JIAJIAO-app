@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { supabase, isConfigured, setupSupabase } from '../lib/supabaseClient';
 import { Job, Order, OrderStatus } from '../types';
 import { JobCard } from '../components/JobCard';
-import { IconX, IconArrowLeft } from '../components/Icons';
+import { IconX, IconArrowLeft, IconLock } from '../components/Icons';
 
 const LOCAL_STORAGE_CONTACT_KEY = 'tutor_match_student_contact';
 
@@ -58,10 +59,12 @@ export const StudentHome: React.FC = () => {
   const fetchOrders = useCallback(async (contact: string) => {
     if (!contact) return;
     try {
+      // CRITICAL FIX: Order by created_at descending so .find() always hits the latest attempt
       const { data, error } = await supabase
         .from('orders')
         .select('*')
-        .eq('student_contact', contact);
+        .eq('student_contact', contact)
+        .order('created_at', { ascending: false });
 
       if (error) {
         console.error('Error fetching orders:', error.message);
@@ -142,12 +145,10 @@ export const StudentHome: React.FC = () => {
   }, [studentContact, fetchJobs, fetchOrders, configured]);
 
   const handleUnlockClick = (job: Job) => {
-    if (studentContact) {
-      setTempContact(studentContact);
-      setPaymentStep('show_qr');
-    } else {
-      setPaymentStep('input_contact');
-    }
+    // FIX: Always show the input step so user can confirm or change number.
+    // Pre-fill with existing contact if available.
+    setTempContact(studentContact); 
+    setPaymentStep('input_contact');
     setSelectedJob(job);
   };
 
@@ -184,6 +185,7 @@ export const StudentHome: React.FC = () => {
   };
 
   const getOrderStatus = (jobId: number) => {
+    // Since fetchOrders sorts by newest first, this finds the latest status
     const order = orders.find(o => o.job_id === jobId);
     return order ? order.status : undefined;
   };
@@ -286,6 +288,18 @@ export const StudentHome: React.FC = () => {
             暂无需求。
           </div>
         )}
+
+        {/* Admin Footer Link */}
+        <div className="mt-12 mb-6 flex justify-center opacity-50 hover:opacity-100 transition-opacity">
+            <Link 
+                to="/my-secret-admin-888" 
+                className="flex items-center gap-2 text-xs text-gray-300 hover:text-gray-500 transition-colors px-4 py-2 rounded-full hover:bg-gray-100"
+            >
+                <IconLock className="w-3 h-3" />
+                <span>管理员入口</span>
+            </Link>
+        </div>
+
       </main>
 
       {selectedJob && (
@@ -301,7 +315,7 @@ export const StudentHome: React.FC = () => {
             <div className="p-6">
               {paymentStep === 'input_contact' && (
                 <div className="space-y-4">
-                   <p className="text-sm text-gray-600">请输入您的手机号或微信号，以便我们核对付款。</p>
+                   <p className="text-sm text-gray-600">请确认或修改您的联系方式，以便我们核对付款。</p>
                    <input 
                       type="text" 
                       placeholder="手机号 / 微信号"
