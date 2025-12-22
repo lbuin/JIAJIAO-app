@@ -5,6 +5,20 @@ import { supabase, isConfigured } from '../lib/supabaseClient';
 import { IconArrowLeft, IconCheck } from '../components/Icons';
 import { CreateJobParams } from '../types';
 
+const SUGGESTED_GRADES = [
+  '小学一年级', '小学二年级', '小学三年级', '小学四年级', '小学五年级', '小学六年级',
+  '初一', '初二', '初三',
+  '高一', '高二', '高三'
+];
+
+const SUGGESTED_SUBJECTS = [
+  '全科作业辅导',
+  '数学', '英语', '语文',
+  '物理', '化学', '生物',
+  '历史', '地理', '政治',
+  '科学', '编程', '钢琴', '美术'
+];
+
 export const ParentPost: React.FC = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
@@ -38,6 +52,11 @@ export const ParentPost: React.FC = () => {
     // Validation
     if (!formData.title || !formData.contact_phone || !formData.price) {
       return alert("请填写完整信息");
+    }
+
+    // Phone Number Validation (Must be 11 digits)
+    if (!/^\d{11}$/.test(formData.contact_phone)) {
+        return alert("提交失败：手机号必须是 11 位数字");
     }
 
     setLoading(true);
@@ -112,21 +131,29 @@ export const ParentPost: React.FC = () => {
               <label className="block text-sm font-bold text-gray-700 mb-1">年级</label>
               <input 
                 name="grade"
+                list="grade-list"
                 value={formData.grade}
                 onChange={handleChange}
                 className="w-full border border-gray-300 rounded-lg p-3 outline-none"
-                placeholder="例如：初二"
+                placeholder="选择或输入"
               />
+              <datalist id="grade-list">
+                {SUGGESTED_GRADES.map(g => <option key={g} value={g} />)}
+              </datalist>
             </div>
             <div>
               <label className="block text-sm font-bold text-gray-700 mb-1">科目</label>
               <input 
                 name="subject"
+                list="subject-list"
                 value={formData.subject}
                 onChange={handleChange}
                 className="w-full border border-gray-300 rounded-lg p-3 outline-none"
-                placeholder="例如：数学"
+                placeholder="选择或输入"
               />
+              <datalist id="subject-list">
+                {SUGGESTED_SUBJECTS.map(s => <option key={s} value={s} />)}
+              </datalist>
             </div>
           </div>
 
@@ -188,6 +215,8 @@ export const ParentPost: React.FC = () => {
                   onChange={handleChange}
                   className="w-full border border-gray-300 rounded-lg p-3 outline-none"
                   placeholder="仅平台可见，用于联系您"
+                  type="tel"
+                  maxLength={11}
                 />
               </div>
             </div>
@@ -204,6 +233,10 @@ export const ParentPost: React.FC = () => {
         >
           {loading ? '提交中...' : '提交需求'}
         </button>
+
+        <div className="mt-8 text-center text-sm text-gray-400">
+            如遇问题，请联系客服QQ: <span className="font-bold text-gray-600 select-all">1400470321</span>
+        </div>
       </main>
     </div>
   );

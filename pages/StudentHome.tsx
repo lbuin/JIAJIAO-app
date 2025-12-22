@@ -12,6 +12,7 @@ type PaymentMethod = 'wechat' | 'alipay';
 
 const WECHAT_QR = "/wechat-pay.jpg"; 
 const ALIPAY_QR = "/alipay.jpg";      
+const CUSTOMER_SERVICE_QQ = "1400470321";
 
 export const StudentHome: React.FC = () => {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -287,7 +288,7 @@ export const StudentHome: React.FC = () => {
           btnText = "申请通过！点击支付获取电话";
           btnClass = "bg-green-600 text-white animate-pulse shadow-green-200 shadow-lg";
       } else if (status === OrderStatus.PAYMENT_PENDING) {
-          btnText = "付款确认中，请稍候...";
+          btnText = `付款确认中... (客服QQ: ${CUSTOMER_SERVICE_QQ})`;
           btnClass = "bg-blue-100 text-blue-800";
           disabled = true;
       } else if (status === OrderStatus.REJECTED) {
@@ -368,8 +369,22 @@ export const StudentHome: React.FC = () => {
                 </div>
             )}
         </section>
+
+        {/* CUSTOMER SERVICE SECTION */}
+        <div className="bg-white rounded-xl p-4 shadow-sm border border-blue-100 flex items-center justify-between">
+             <div className="flex flex-col">
+                <span className="font-bold text-gray-800 text-sm">需要帮助？</span>
+                <span className="text-xs text-gray-500 mt-1">审核催单 / 支付问题 / 咨询</span>
+             </div>
+             <div className="text-right">
+                <a href={`mqqwpa://im/chat?chat_type=wpa&uin=${CUSTOMER_SERVICE_QQ}&version=1&src_type=web`} className="text-blue-600 font-bold font-mono text-lg block select-all">
+                    {CUSTOMER_SERVICE_QQ}
+                </a>
+                <span className="text-[10px] text-gray-400">点击复制客服 QQ</span>
+             </div>
+        </div>
         
-        <div className="mt-12 text-center">
+        <div className="mt-8 text-center">
             <Link to="/my-secret-admin-888" className="text-xs text-gray-300 hover:text-gray-500">管理员入口</Link>
         </div>
       </main>
@@ -419,6 +434,7 @@ export const StudentHome: React.FC = () => {
                        <img src={paymentMethod === 'wechat' ? WECHAT_QR : ALIPAY_QR} className="w-40 h-40 object-cover" />
                    </div>
                    <button onClick={handlePaymentComplete} disabled={loading} className={`w-full text-white font-bold py-3 rounded-lg ${paymentMethod === 'wechat' ? 'bg-green-600' : 'bg-blue-600'}`}>我已支付</button>
+                   <p className="text-xs text-gray-400 mt-2">支付遇到问题？请联系客服 QQ: <span className="text-gray-600 font-bold select-all">{CUSTOMER_SERVICE_QQ}</span></p>
                 </div>
             )}
           </div>
