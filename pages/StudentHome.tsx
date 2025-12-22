@@ -10,6 +10,10 @@ const LOCAL_STORAGE_CONTACT_KEY = 'tutor_match_student_contact';
 type Step = 'input_contact' | 'fill_profile' | 'show_qr';
 type PaymentMethod = 'wechat' | 'alipay';
 
+// --- 请替换为您真实的图片地址 ---
+const WECHAT_QR = "https://github.com/lbuin/JIAJIAO-app/blob/main/163d0a18aa6260eaa1cabf21c2443afa.jpg?raw=true"; 
+const ALIPAY_QR = "https://github.com/lbuin/JIAJIAO-app/blob/main/39fa725bde6f1aaa2665d3fa68edd91f.jpg?raw=true";      
+
 export const StudentHome: React.FC = () => {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -31,7 +35,6 @@ export const StudentHome: React.FC = () => {
 
   // Payment State
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('wechat');
-  const [qrCodes, setQrCodes] = useState({ wechat: '', alipay: '' });
 
   // Profile Form State
   const [profileForm, setProfileForm] = useState<Omit<StudentProfile, 'id' | 'created_at' | 'phone'>>({
@@ -84,18 +87,6 @@ export const StudentHome: React.FC = () => {
     } catch (err) {
       console.error(err);
     }
-  }, []);
-
-  const fetchPaymentSettings = useCallback(async () => {
-    const { data } = await supabase.from('system_settings').select('*');
-    let newQrs = { wechat: '', alipay: '' };
-    if (data) {
-        data.forEach((item: {key: string, value: string}) => {
-            if (item.key === 'wechat_pay_url') newQrs.wechat = item.value;
-            if (item.key === 'alipay_url') newQrs.alipay = item.value;
-        });
-    }
-    setQrCodes(newQrs);
   }, []);
 
   const handleSaveConfig = async () => {
@@ -152,7 +143,6 @@ export const StudentHome: React.FC = () => {
     // If approved by Admin/Parent, show payment QR immediately
     if (status === OrderStatus.PARENT_APPROVED) {
         setStep('show_qr');
-        fetchPaymentSettings(); // Fetch dynamic QRs
     } else {
         // Otherwise start with contact/profile check to Apply
         setStep('input_contact');
@@ -415,9 +405,9 @@ export const StudentHome: React.FC = () => {
                    {/* QR Code Display */}
                    <div className="bg-white border border-gray-100 p-4 rounded-xl inline-block shadow-sm">
                        {paymentMethod === 'wechat' ? (
-                           qrCodes.wechat ? <img src={qrCodes.wechat} className="w-40 h-40 object-cover" /> : <div className="w-40 h-40 bg-gray-100 flex items-center justify-center text-xs text-gray-400">暂无微信二维码</div>
+                           <img src={WECHAT_QR} className="w-40 h-40 object-cover" alt="微信支付" />
                        ) : (
-                           qrCodes.alipay ? <img src={qrCodes.alipay} className="w-40 h-40 object-cover" /> : <div className="w-40 h-40 bg-gray-100 flex items-center justify-center text-xs text-gray-400">暂无支付宝二维码</div>
+                           <img src={ALIPAY_QR} className="w-40 h-40 object-cover" alt="支付宝" />
                        )}
                    </div>
 
