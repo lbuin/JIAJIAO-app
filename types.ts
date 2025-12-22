@@ -11,7 +11,7 @@ export interface Job {
   contact_phone: string;
   manage_password?: string; // Optional/Deprecated
   is_active: boolean;
-  status?: 'pending' | 'published' | 'rejected';
+  status?: 'pending' | 'published' | 'rejected' | 'taken'; // Added 'taken'
   created_at?: string;
 }
 
