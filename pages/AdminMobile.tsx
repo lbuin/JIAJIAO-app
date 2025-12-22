@@ -4,7 +4,7 @@ import { supabase, isConfigured } from '../lib/supabaseClient';
 import { Order, Job, OrderStatus, StudentProfile, OrderWithDetails } from '../types';
 import { IconCheck, IconX, IconLock } from '../components/Icons';
 
-type Tab = 'applications' | 'finance' | 'jobs';
+type Tab = 'applications' | 'finance' | 'jobs' | 'settings';
 
 export const AdminMobile: React.FC = () => {
   const navigate = useNavigate();
@@ -18,10 +18,33 @@ export const AdminMobile: React.FC = () => {
   const [payments, setPayments] = useState<OrderWithDetails[]>([]);         // Status = PAYMENT_PENDING
   const [pendingJobs, setPendingJobs] = useState<Job[]>([]);                // Status = PENDING
   
+  // Settings Store
+  const [wechatUrl, setWechatUrl] = useState('');
+  const [alipayUrl, setAlipayUrl] = useState('');
+  
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
   // --- Fetch Logic ---
+
+  const fetchSettings = useCallback(async () => {
+    if (!isConfigured()) return;
+    const { data } = await supabase.from('system_settings').select('*');
+    if (data) {
+        data.forEach((item: {key: string, value: string}) => {
+            if (item.key === 'wechat_pay_url') setWechatUrl(item.value);
+            if (item.key === 'alipay_url') setAlipayUrl(item.value);
+        });
+    }
+  }, []);
+
+  const saveSettings = async () => {
+      setLoading(true);
+      await supabase.from('system_settings').upsert({ key: 'wechat_pay_url', value: wechatUrl });
+      await supabase.from('system_settings').upsert({ key: 'alipay_url', value: alipayUrl });
+      setLoading(false);
+      alert("收款码设置已保存");
+  };
 
   // 1. Fetch Orders (Both Applications & Payments)
   const fetchOrders = useCallback(async (isBackground = false) => {
@@ -87,6 +110,7 @@ export const AdminMobile: React.FC = () => {
     
     fetchOrders();
     fetchPendingJobs();
+    fetchSettings();
 
     const channel = supabase.channel('admin_all')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchOrders(true))
@@ -94,7 +118,7 @@ export const AdminMobile: React.FC = () => {
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [isAuthenticated, fetchOrders, fetchPendingJobs]);
+  }, [isAuthenticated, fetchOrders, fetchPendingJobs, fetchSettings]);
 
   const handleLogin = () => {
     if (passwordInput === 'xk,131579') setIsAuthenticated(true);
@@ -149,25 +173,11 @@ export const AdminMobile: React.FC = () => {
         </div>
         
         {/* Tabs */}
-        <div className="flex bg-gray-100 p-1 rounded-lg">
-            <button 
-                onClick={() => setActiveTab('applications')}
-                className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${activeTab === 'applications' ? 'bg-white shadow text-black' : 'text-gray-500'}`}
-            >
-                新申请 ({applications.length})
-            </button>
-            <button 
-                onClick={() => setActiveTab('finance')}
-                className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${activeTab === 'finance' ? 'bg-white shadow text-black' : 'text-gray-500'}`}
-            >
-                待收款 ({payments.length})
-            </button>
-            <button 
-                onClick={() => setActiveTab('jobs')}
-                className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${activeTab === 'jobs' ? 'bg-white shadow text-black' : 'text-gray-500'}`}
-            >
-                新帖子 ({pendingJobs.length})
-            </button>
+        <div className="flex bg-gray-100 p-1 rounded-lg gap-1 overflow-x-auto">
+            <button onClick={() => setActiveTab('applications')} className={`flex-1 py-2 text-[10px] md:text-xs font-bold rounded-md whitespace-nowrap px-1 transition-all ${activeTab === 'applications' ? 'bg-white shadow text-black' : 'text-gray-500'}`}>新申请 ({applications.length})</button>
+            <button onClick={() => setActiveTab('finance')} className={`flex-1 py-2 text-[10px] md:text-xs font-bold rounded-md whitespace-nowrap px-1 transition-all ${activeTab === 'finance' ? 'bg-white shadow text-black' : 'text-gray-500'}`}>待收款 ({payments.length})</button>
+            <button onClick={() => setActiveTab('jobs')} className={`flex-1 py-2 text-[10px] md:text-xs font-bold rounded-md whitespace-nowrap px-1 transition-all ${activeTab === 'jobs' ? 'bg-white shadow text-black' : 'text-gray-500'}`}>帖子 ({pendingJobs.length})</button>
+            <button onClick={() => setActiveTab('settings')} className={`flex-1 py-2 text-[10px] md:text-xs font-bold rounded-md whitespace-nowrap px-1 transition-all ${activeTab === 'settings' ? 'bg-white shadow text-black' : 'text-gray-500'}`}>设置</button>
         </div>
       </div>
 
@@ -179,13 +189,10 @@ export const AdminMobile: React.FC = () => {
              applications.length === 0 ? <p className="text-center text-gray-400 mt-10">暂无新申请</p> :
              applications.map(order => (
                 <div key={order.id} className="bg-white rounded-2xl shadow-sm p-5 border border-gray-100">
-                    {/* Header */}
                     <div className="flex justify-between items-start mb-3">
                         <span className="bg-yellow-100 text-yellow-800 text-[10px] font-bold px-2 py-0.5 rounded-full">需对接家长</span>
                         <span className="text-xs text-gray-400">#{order.id}</span>
                     </div>
-
-                    {/* Student Info */}
                     <div className="mb-4">
                         <div className="font-bold text-lg">{order.profile?.name || order.student_contact}</div>
                         <div className="text-sm text-gray-500">{order.profile?.school} · {order.profile?.major} · {order.profile?.grade}</div>
@@ -195,16 +202,12 @@ export const AdminMobile: React.FC = () => {
                             </div>
                         )}
                     </div>
-
-                    {/* Job Info (Parent Contact) */}
                     <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 mb-4">
                         <div className="text-[10px] text-blue-800 font-bold uppercase mb-1">对接目标 (家长)</div>
                         <div className="text-sm font-bold text-blue-900">{order.jobs?.contact_name}</div>
                         <div className="text-lg font-mono text-blue-700 select-all">{order.jobs?.contact_phone}</div>
                         <div className="text-xs text-blue-600 mt-1">{order.jobs?.title} ({order.jobs?.price})</div>
                     </div>
-
-                    {/* Actions */}
                     <div className="grid grid-cols-2 gap-3">
                         <button onClick={() => handleRejectOrder(order.id)} className="py-2 bg-red-50 text-red-600 rounded-lg font-bold text-sm">不合适</button>
                         <button onClick={() => handleApproveApplication(order.id)} className="py-2 bg-black text-white rounded-lg font-bold text-sm shadow-md">
@@ -224,13 +227,11 @@ export const AdminMobile: React.FC = () => {
                         <span className="bg-green-100 text-green-800 text-[10px] font-bold px-2 py-0.5 rounded-full">已支付</span>
                         <span className="text-xs text-gray-400">#{order.id}</span>
                     </div>
-
                     <div className="mb-4">
                         <div className="font-bold text-gray-800">{order.profile?.name || order.student_contact}</div>
                         <div className="text-sm text-gray-500">申请: {order.jobs?.title}</div>
                         <div className="text-xs text-gray-400 mt-1">学生电话: {order.student_contact}</div>
                     </div>
-
                     <div className="grid grid-cols-2 gap-3">
                         <button onClick={() => handleRejectOrder(order.id)} className="py-2 bg-red-50 text-red-600 rounded-lg font-bold text-sm">驳回</button>
                         <button onClick={() => handleConfirmPayment(order.id)} className="py-2 bg-green-500 text-white rounded-lg font-bold text-sm shadow-green-200 shadow-md">
@@ -257,6 +258,51 @@ export const AdminMobile: React.FC = () => {
                     </div>
                 </div>
              ))
+        )}
+
+        {/* --- TAB 4: SETTINGS (Payment QR Codes) --- */}
+        {activeTab === 'settings' && (
+            <div className="bg-white rounded-2xl shadow-sm p-5 border border-gray-100">
+                <h3 className="font-bold text-lg text-gray-900 mb-4">收款码设置</h3>
+                <div className="space-y-6">
+                    <div>
+                        <label className="block text-sm font-bold text-green-700 mb-2">微信支付图片链接</label>
+                        <input 
+                          className="w-full border p-3 rounded-xl bg-gray-50 text-sm" 
+                          placeholder="例如: https://.../wechat.jpg"
+                          value={wechatUrl}
+                          onChange={e => setWechatUrl(e.target.value)}
+                        />
+                        {wechatUrl && (
+                            <div className="mt-2 w-32 h-32 bg-gray-100 rounded-lg overflow-hidden border">
+                                <img src={wechatUrl} alt="WeChat Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.style.display = 'none')} />
+                            </div>
+                        )}
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-blue-600 mb-2">支付宝图片链接</label>
+                        <input 
+                          className="w-full border p-3 rounded-xl bg-gray-50 text-sm" 
+                          placeholder="例如: https://.../alipay.jpg"
+                          value={alipayUrl}
+                          onChange={e => setAlipayUrl(e.target.value)}
+                        />
+                         {alipayUrl && (
+                            <div className="mt-2 w-32 h-32 bg-gray-100 rounded-lg overflow-hidden border">
+                                <img src={alipayUrl} alt="Alipay Preview" className="w-full h-full object-cover" onError={(e) => (e.currentTarget.style.display = 'none')} />
+                            </div>
+                        )}
+                    </div>
+                    <button 
+                        onClick={saveSettings}
+                        disabled={loading}
+                        className="w-full bg-black text-white py-3 rounded-xl font-bold hover:bg-gray-800 transition-colors"
+                    >
+                        {loading ? '保存中...' : '保存设置'}
+                    </button>
+                    <p className="text-xs text-gray-400 mt-2">提示：请将二维码上传到图床，并粘贴直链地址到上方。</p>
+                </div>
+            </div>
         )}
       </div>
     </div>

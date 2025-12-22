@@ -8,6 +8,7 @@ import { IconX, IconArrowLeft, IconLock } from '../components/Icons';
 const LOCAL_STORAGE_CONTACT_KEY = 'tutor_match_student_contact';
 
 type Step = 'input_contact' | 'fill_profile' | 'show_qr';
+type PaymentMethod = 'wechat' | 'alipay';
 
 export const StudentHome: React.FC = () => {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -28,6 +29,10 @@ export const StudentHome: React.FC = () => {
   const [step, setStep] = useState<Step>('input_contact');
   const [tempContact, setTempContact] = useState(studentContact);
 
+  // Payment State
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('wechat');
+  const [qrCodes, setQrCodes] = useState({ wechat: '', alipay: '' });
+
   // Profile Form State
   const [profileForm, setProfileForm] = useState<Omit<StudentProfile, 'id' | 'created_at' | 'phone'>>({
     name: '',
@@ -36,7 +41,6 @@ export const StudentHome: React.FC = () => {
     grade: '',
     experience: ''
   });
-  const [existingProfileName, setExistingProfileName] = useState<string | null>(null);
 
   useEffect(() => {
     setConfigUrl(localStorage.getItem('VITE_SUPABASE_URL') || '');
@@ -80,6 +84,18 @@ export const StudentHome: React.FC = () => {
     } catch (err) {
       console.error(err);
     }
+  }, []);
+
+  const fetchPaymentSettings = useCallback(async () => {
+    const { data } = await supabase.from('system_settings').select('*');
+    let newQrs = { wechat: '', alipay: '' };
+    if (data) {
+        data.forEach((item: {key: string, value: string}) => {
+            if (item.key === 'wechat_pay_url') newQrs.wechat = item.value;
+            if (item.key === 'alipay_url') newQrs.alipay = item.value;
+        });
+    }
+    setQrCodes(newQrs);
   }, []);
 
   const handleSaveConfig = async () => {
@@ -136,6 +152,7 @@ export const StudentHome: React.FC = () => {
     // If approved by Admin/Parent, show payment QR immediately
     if (status === OrderStatus.PARENT_APPROVED) {
         setStep('show_qr');
+        fetchPaymentSettings(); // Fetch dynamic QRs
     } else {
         // Otherwise start with contact/profile check to Apply
         setStep('input_contact');
@@ -377,10 +394,37 @@ export const StudentHome: React.FC = () => {
             )}
             {step === 'show_qr' && (
                 <div className="text-center space-y-4">
-                   <p className="text-sm text-green-700 font-bold">匹配成功！</p>
-                   <div className="bg-gray-100 p-4 rounded-xl inline-block"><img src="https://picsum.photos/200/200?grayscale" className="w-40 h-40 mix-blend-multiply" /></div>
-                   <p className="text-xs text-gray-500">扫码支付 ¥5.00 获取联系电话</p>
-                   <button onClick={handlePaymentComplete} disabled={loading} className="w-full bg-green-600 text-white font-bold py-3 rounded-lg">我已付款</button>
+                   <p className="text-sm text-green-700 font-bold">匹配成功！请支付信息费</p>
+                   
+                   {/* Payment Tabs */}
+                   <div className="flex bg-gray-100 p-1 rounded-lg mb-2">
+                        <button 
+                            onClick={() => setPaymentMethod('wechat')}
+                            className={`flex-1 py-1.5 text-xs font-bold rounded transition-all ${paymentMethod === 'wechat' ? 'bg-white text-green-600 shadow-sm' : 'text-gray-500'}`}
+                        >
+                            微信支付
+                        </button>
+                        <button 
+                            onClick={() => setPaymentMethod('alipay')}
+                            className={`flex-1 py-1.5 text-xs font-bold rounded transition-all ${paymentMethod === 'alipay' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}
+                        >
+                            支付宝
+                        </button>
+                   </div>
+
+                   {/* QR Code Display */}
+                   <div className="bg-white border border-gray-100 p-4 rounded-xl inline-block shadow-sm">
+                       {paymentMethod === 'wechat' ? (
+                           qrCodes.wechat ? <img src={qrCodes.wechat} className="w-40 h-40 object-cover" /> : <div className="w-40 h-40 bg-gray-100 flex items-center justify-center text-xs text-gray-400">暂无微信二维码</div>
+                       ) : (
+                           qrCodes.alipay ? <img src={qrCodes.alipay} className="w-40 h-40 object-cover" /> : <div className="w-40 h-40 bg-gray-100 flex items-center justify-center text-xs text-gray-400">暂无支付宝二维码</div>
+                       )}
+                   </div>
+
+                   <p className="text-xs text-gray-500">扫码支付 ¥5.00 并点击下方按钮</p>
+                   <button onClick={handlePaymentComplete} disabled={loading} className={`w-full text-white font-bold py-3 rounded-lg transition-colors ${paymentMethod === 'wechat' ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                       我已{paymentMethod === 'wechat' ? '微信' : '支付宝'}支付
+                   </button>
                 </div>
             )}
           </div>
