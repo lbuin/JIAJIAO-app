@@ -44,9 +44,14 @@ const initClient = (url: string, key: string) => {
   }
 };
 
+// Hardcoded defaults provided by user
+const HARDCODED_URL = 'https://kweocrvfibksftnxomtr.supabase.co';
+const HARDCODED_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt3ZW9jcnZmaWJrc2Z0bnhvbXRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY0MjM3MTMsImV4cCI6MjA4MTk5OTcxM30.elzLNdEvyPLE_gsrGJEnacA4t9JlY4qkw2_N6Nt2ufQ';
+
 // Load initial config
-const initialUrl = getEnv('VITE_SUPABASE_URL');
-const initialKey = getEnv('VITE_SUPABASE_ANON_KEY');
+// Priority: Env Vars -> LocalStorage -> Hardcoded Defaults
+const initialUrl = getEnv('VITE_SUPABASE_URL') || HARDCODED_URL;
+const initialKey = getEnv('VITE_SUPABASE_ANON_KEY') || HARDCODED_KEY;
 
 currentClient = initClient(initialUrl, initialKey);
 
@@ -70,9 +75,9 @@ export const setupSupabase = (url: string, key: string) => {
  * Check if the client has valid (non-placeholder) credentials.
  */
 export const isConfigured = () => {
-  // We check the localStorage or the current client source
-  const url = getEnv('VITE_SUPABASE_URL');
-  const key = getEnv('VITE_SUPABASE_ANON_KEY');
+  // We check the localStorage, current client source, or hardcoded defaults
+  const url = getEnv('VITE_SUPABASE_URL') || HARDCODED_URL;
+  const key = getEnv('VITE_SUPABASE_ANON_KEY') || HARDCODED_KEY;
   return !!(url && key && !url.includes('placeholder.supabase.co'));
 };
 
