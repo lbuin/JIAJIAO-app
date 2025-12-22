@@ -25,6 +25,23 @@ export interface Order {
   created_at: string;
 }
 
+export interface StudentProfile {
+  id?: number;
+  phone: string;
+  name: string;
+  school: string;
+  major: string;
+  grade: string;
+  experience: string;
+  created_at?: string;
+}
+
+// Helper type for Admin View
+export interface OrderWithDetails extends Order {
+  jobs: Job;
+  profile?: StudentProfile;
+}
+
 export interface CreateJobParams {
   title: string;
   grade: string;

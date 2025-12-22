@@ -1,11 +1,13 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase, isConfigured, setupSupabase } from '../lib/supabaseClient';
-import { Job, Order, OrderStatus } from '../types';
+import { Job, Order, OrderStatus, StudentProfile } from '../types';
 import { JobCard } from '../components/JobCard';
 import { IconX, IconArrowLeft, IconLock } from '../components/Icons';
 
 const LOCAL_STORAGE_CONTACT_KEY = 'tutor_match_student_contact';
+
+type Step = 'input_contact' | 'fill_profile' | 'show_qr';
 
 export const StudentHome: React.FC = () => {
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -25,8 +27,18 @@ export const StudentHome: React.FC = () => {
 
   // Modal State
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
-  const [paymentStep, setPaymentStep] = useState<'input_contact' | 'show_qr' | 'processing'>('input_contact');
+  const [step, setStep] = useState<Step>('input_contact');
   const [tempContact, setTempContact] = useState(studentContact);
+
+  // Profile Form State
+  const [profileForm, setProfileForm] = useState<Omit<StudentProfile, 'id' | 'created_at' | 'phone'>>({
+    name: '',
+    school: '',
+    major: '',
+    grade: '',
+    experience: ''
+  });
+  const [existingProfileName, setExistingProfileName] = useState<string | null>(null);
 
   useEffect(() => {
     // Pre-fill config inputs from localStorage if available
@@ -145,18 +157,88 @@ export const StudentHome: React.FC = () => {
   }, [studentContact, fetchJobs, fetchOrders, configured]);
 
   const handleUnlockClick = (job: Job) => {
-    // FIX: Always show the input step so user can confirm or change number.
-    // Pre-fill with existing contact if available.
     setTempContact(studentContact); 
-    setPaymentStep('input_contact');
+    setStep('input_contact');
     setSelectedJob(job);
+    setExistingProfileName(null);
   };
 
-  const handleConfirmContact = () => {
-    if (!tempContact) return alert("请输入您的联系方式");
-    setStudentContact(tempContact);
-    localStorage.setItem(LOCAL_STORAGE_CONTACT_KEY, tempContact);
-    setPaymentStep('show_qr');
+  const checkProfileAndNext = async () => {
+    if (!tempContact) return alert("请输入您的手机号");
+    
+    setLoading(true);
+    try {
+      // Use maybeSingle to avoid errors on 0 rows
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('name')
+        .eq('phone', tempContact)
+        .maybeSingle();
+
+      if (error) {
+        // If table profiles doesn't exist (code 42P01), skip resume logic
+        if (error.code === '42P01') {
+            console.warn("Profiles table missing, skipping check.");
+            setStep('show_qr');
+        } else {
+            console.error("Error checking profile:", error);
+            // Default to fill profile if we can't verify existence? 
+            // Or skip to QR to avoid blocking payment? 
+            // Let's assume new user if error (except connection issues).
+            setStep('fill_profile');
+        }
+      } else if (profile) {
+        // Exists
+        setExistingProfileName(profile.name);
+        setStep('show_qr');
+      } else {
+        // Does not exist
+        setStep('fill_profile');
+      }
+      
+      // Update global contact state
+      setStudentContact(tempContact);
+      localStorage.setItem(LOCAL_STORAGE_CONTACT_KEY, tempContact);
+
+    } catch (err) {
+      console.error(err);
+      setStep('show_qr');
+    }
+    setLoading(false);
+  };
+
+  const handleProfileSubmit = async () => {
+    // Validate
+    if (!profileForm.name || !profileForm.school || !profileForm.major) {
+      return alert("请填写带 * 的必填项");
+    }
+
+    setLoading(true);
+    try {
+      // Use upsert to handle duplicate keys (if user exists but check failed, or double submit)
+      const { error } = await supabase.from('profiles').upsert([
+        {
+          phone: tempContact,
+          ...profileForm
+        }
+      ], { onConflict: 'phone' });
+
+      if (error) {
+        // If table is missing, don't block user, let them pay
+        if (error.code === '42P01') {
+             console.warn("Profiles table missing during save, skipping.");
+             setStep('show_qr');
+        } else {
+             alert("保存简历失败: " + error.message);
+        }
+      } else {
+        // Success
+        setStep('show_qr');
+      }
+    } catch (err: any) {
+      alert("Error: " + err.message);
+    }
+    setLoading(false);
   };
 
   const handlePaymentComplete = async () => {
@@ -185,7 +267,6 @@ export const StudentHome: React.FC = () => {
   };
 
   const getOrderStatus = (jobId: number) => {
-    // Since fetchOrders sorts by newest first, this finds the latest status
     const order = orders.find(o => o.job_id === jobId);
     return order ? order.status : undefined;
   };
@@ -271,7 +352,7 @@ export const StudentHome: React.FC = () => {
         )}
 
         {configured && loading && !errorMsg ? (
-          <div className="text-center text-gray-400 py-10">正在加载需求列表...</div>
+          <div className="text-center text-gray-400 py-10">正在加载...</div>
         ) : (
           !isMissingTables && jobs.map(job => (
             <JobCard 
@@ -303,37 +384,89 @@ export const StudentHome: React.FC = () => {
       </main>
 
       {selectedJob && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl animate-fade-in">
-            <div className="p-4 border-b border-gray-100 flex justify-between items-center">
-              <h3 className="font-bold text-lg">获取联系方式</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl animate-fade-in my-auto">
+            <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+              <h3 className="font-bold text-lg text-gray-800">
+                {step === 'input_contact' ? '身份验证' : 
+                 step === 'fill_profile' ? '完善简历' : '确认支付'}
+              </h3>
               <button onClick={() => setSelectedJob(null)} className="text-gray-400 hover:text-gray-600">
                 <IconX />
               </button>
             </div>
             
             <div className="p-6">
-              {paymentStep === 'input_contact' && (
+              {step === 'input_contact' && (
                 <div className="space-y-4">
-                   <p className="text-sm text-gray-600">请确认或修改您的联系方式，以便我们核对付款。</p>
+                   <p className="text-sm text-gray-600">请输入手机号，以便我们核实身份。</p>
                    <input 
                       type="text" 
-                      placeholder="手机号 / 微信号"
-                      className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 outline-none"
+                      placeholder="手机号码"
+                      className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 outline-none text-lg tracking-wide"
                       value={tempContact}
                       onChange={(e) => setTempContact(e.target.value)}
                    />
                    <button 
-                     onClick={handleConfirmContact}
-                     className="w-full bg-blue-600 text-white font-semibold py-3 rounded-lg hover:bg-blue-700"
+                     onClick={checkProfileAndNext}
+                     disabled={loading}
+                     className="w-full bg-blue-600 text-white font-semibold py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50"
                    >
-                     下一步
+                     {loading ? '查询中...' : '下一步'}
                    </button>
                 </div>
               )}
 
-              {paymentStep === 'show_qr' && (
+              {step === 'fill_profile' && (
+                <div className="space-y-3">
+                   <p className="text-xs text-yellow-600 bg-yellow-50 p-2 rounded mb-2">
+                     初次使用，请简单完善您的家教简历，以便家长更好地了解您。
+                   </p>
+                   <div>
+                     <label className="text-xs font-bold text-gray-700">姓名 *</label>
+                     <input className="w-full border p-2 rounded mt-1 text-sm" placeholder="真实姓名"
+                       value={profileForm.name} onChange={e => setProfileForm({...profileForm, name: e.target.value})} />
+                   </div>
+                   <div className="grid grid-cols-2 gap-2">
+                     <div>
+                       <label className="text-xs font-bold text-gray-700">在读学校 *</label>
+                       <input className="w-full border p-2 rounded mt-1 text-sm" placeholder="如: 北大"
+                         value={profileForm.school} onChange={e => setProfileForm({...profileForm, school: e.target.value})} />
+                     </div>
+                     <div>
+                       <label className="text-xs font-bold text-gray-700">专业 *</label>
+                       <input className="w-full border p-2 rounded mt-1 text-sm" placeholder="如: 数学"
+                         value={profileForm.major} onChange={e => setProfileForm({...profileForm, major: e.target.value})} />
+                     </div>
+                   </div>
+                   <div>
+                     <label className="text-xs font-bold text-gray-700">年级</label>
+                     <input className="w-full border p-2 rounded mt-1 text-sm" placeholder="如: 本科大三 / 研一"
+                       value={profileForm.grade} onChange={e => setProfileForm({...profileForm, grade: e.target.value})} />
+                   </div>
+                   <div>
+                     <label className="text-xs font-bold text-gray-700">家教经验</label>
+                     <textarea className="w-full border p-2 rounded mt-1 text-sm h-20" placeholder="简述之前的家教经历..."
+                       value={profileForm.experience} onChange={e => setProfileForm({...profileForm, experience: e.target.value})} />
+                   </div>
+                   
+                   <button 
+                     onClick={handleProfileSubmit}
+                     disabled={loading}
+                     className="w-full bg-black text-white font-semibold py-3 rounded-lg hover:bg-gray-800 mt-2 disabled:opacity-50"
+                   >
+                     {loading ? '保存中...' : '保存并继续'}
+                   </button>
+                </div>
+              )}
+
+              {step === 'show_qr' && (
                 <div className="text-center space-y-5">
+                   {existingProfileName && (
+                     <div className="bg-green-50 text-green-700 p-2 rounded text-sm mb-2">
+                       欢迎回来，{existingProfileName}同学
+                     </div>
+                   )}
                    <div className="bg-blue-50 p-4 rounded-xl inline-block">
                      <img 
                        src="https://picsum.photos/200/200?grayscale" 
@@ -347,18 +480,19 @@ export const StudentHome: React.FC = () => {
                    </div>
                    <button 
                      onClick={handlePaymentComplete}
-                     className="w-full bg-green-600 text-white font-semibold py-3 rounded-lg hover:bg-green-700 shadow-lg shadow-green-200"
+                     disabled={loading}
+                     className="w-full bg-green-600 text-white font-semibold py-3 rounded-lg hover:bg-green-700 shadow-lg shadow-green-200 disabled:opacity-50"
                    >
-                     我已付款
+                     {loading ? '处理中...' : '我已付款'}
                    </button>
                    
                    <button 
-                     onClick={() => setPaymentStep('input_contact')}
+                     onClick={() => setStep('input_contact')}
                      className="block w-full text-center text-sm text-gray-500 hover:text-gray-700 mt-2 py-2"
                    >
                      <div className="inline-flex items-center gap-1">
                        <IconArrowLeft className="w-3 h-3" />
-                       <span>返回上一步</span>
+                       <span>更换手机号</span>
                      </div>
                    </button>
                 </div>
