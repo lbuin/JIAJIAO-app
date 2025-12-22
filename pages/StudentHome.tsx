@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase, isConfigured, setupSupabase } from '../lib/supabaseClient';
@@ -11,7 +12,6 @@ type Step = 'input_contact' | 'fill_profile' | 'show_qr';
 type PaymentMethod = 'wechat' | 'alipay';
 
 // --- 静态资源引用 (最稳健方案) ---
-// 图片文件将直接从项目的 public 文件夹读取，不依赖任何外部网络
 const WECHAT_QR = "/wechat-pay.jpg"; 
 const ALIPAY_QR = "/alipay.jpg";      
 
@@ -36,6 +36,9 @@ export const StudentHome: React.FC = () => {
 
   // Payment State
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('wechat');
+
+  // Fee Calculation
+  const [calculatedFee, setCalculatedFee] = useState<{ hours: number, amount: number, note: string }>({ hours: 0, amount: 0, note: '' });
 
   // Profile Form State
   const [profileForm, setProfileForm] = useState<Omit<StudentProfile, 'id' | 'created_at' | 'phone'>>({
@@ -130,16 +133,52 @@ export const StudentHome: React.FC = () => {
     }
   }, [studentContact, fetchJobs, fetchOrders, configured]);
 
-  // --- Logic Updated for New Flow ---
-  const getOrderStatus = (jobId: number) => {
-    const order = orders.find(o => o.job_id === jobId);
-    return order ? order.status : undefined;
+  // --- Fee Calculation Logic ---
+  const calculateInfoFee = (job: Job) => {
+    // Extract numerical price
+    const hourlyPrice = parseFloat(job.price.replace(/[^\d.]/g, ''));
+    if (isNaN(hourlyPrice)) {
+        return { hours: 0, amount: 0, note: '无法自动计算 (价格格式错误)' };
+    }
+    
+    const freq = job.frequency || 1; // Default to 1 if missing
+    const grade = job.grade || '';
+    
+    let hoursToCharge = 0;
+
+    // Logic based on the provided image
+    if (grade.includes('高中')) {
+        if (freq === 1) hoursToCharge = 3;
+        else if (freq === 2) hoursToCharge = 3.5;
+        else if (freq === 3) hoursToCharge = 4;
+        else if (freq >= 4) hoursToCharge = 5.5;
+    } else if (grade.includes('初中')) {
+        if (freq === 1) hoursToCharge = 3;
+        else if (freq === 2) hoursToCharge = 4;
+        else if (freq === 3) hoursToCharge = 5;
+        else if (freq >= 4 && freq < 5) hoursToCharge = 6;
+        else if (freq >= 5) hoursToCharge = 7;
+    } else {
+        // Default to Primary School (小学) logic for others
+        const map = [0, 3, 4, 5, 6, 7, 8]; // Index matches freq
+        if (freq < map.length) hoursToCharge = map[freq];
+        else hoursToCharge = 8; // Cap at 8 for 6+ times
+    }
+
+    return {
+        hours: hoursToCharge,
+        amount: hoursToCharge * hourlyPrice,
+        note: `${job.grade} - 每周${freq}次`
+    };
   };
 
   const handleJobAction = (job: Job) => {
     const status = getOrderStatus(job.id);
     setSelectedJob(job);
     setTempContact(studentContact);
+    
+    // Calculate fee when opening modal
+    setCalculatedFee(calculateInfoFee(job));
 
     // If approved by Admin/Parent, show payment QR immediately
     if (status === OrderStatus.PARENT_APPROVED) {
@@ -148,6 +187,12 @@ export const StudentHome: React.FC = () => {
         // Otherwise start with contact/profile check to Apply
         setStep('input_contact');
     }
+  };
+
+  // --- Logic Updated for New Flow ---
+  const getOrderStatus = (jobId: number) => {
+    const order = orders.find(o => o.job_id === jobId);
+    return order ? order.status : undefined;
   };
 
   const checkProfileAndNext = async () => {
@@ -193,7 +238,7 @@ export const StudentHome: React.FC = () => {
   const submitApplication = async (contact = studentContact) => {
     if (!selectedJob) return;
     
-    // Check for existing order to prevent duplicates if user spams click
+    // Check for existing order to prevent duplicates
     const existing = orders.find(o => o.job_id === selectedJob.id && o.status !== OrderStatus.REJECTED);
     if (existing) {
         alert("您已申请过此职位，请等待审核。");
@@ -342,6 +387,7 @@ export const StudentHome: React.FC = () => {
                 <div className="space-y-1 text-sm text-gray-600">
                     <p><span className="font-medium">年级:</span> {job.grade}</p>
                     <p><span className="font-medium">价格:</span> {job.price}</p>
+                    <p><span className="font-medium">次数:</span> 每周 {job.frequency || 1} 次</p>
                     <p><span className="font-medium">地址:</span> {job.address}</p>
                 </div>
                 {renderJobButton(job, getOrderStatus(job.id))}
@@ -387,6 +433,18 @@ export const StudentHome: React.FC = () => {
                 <div className="text-center space-y-4">
                    <p className="text-sm text-green-700 font-bold">匹配成功！请支付信息费</p>
                    
+                   {/* FEE CALCULATION DISPLAY */}
+                   <div className="bg-blue-50 border border-blue-100 p-3 rounded-lg text-left mb-2">
+                        <div className="text-xs text-gray-500 mb-1">计费标准: {calculatedFee.note}</div>
+                        <div className="flex justify-between items-end">
+                            <span className="text-sm font-bold text-gray-700">应付金额:</span>
+                            <span className="text-xl font-bold text-blue-700">¥ {calculatedFee.amount}</span>
+                        </div>
+                        <div className="text-[10px] text-gray-400 mt-1">
+                            (计算公式: {calculatedFee.hours}小时课时费 x 单价)
+                        </div>
+                   </div>
+
                    {/* Payment Tabs */}
                    <div className="flex bg-gray-100 p-1 rounded-lg mb-2">
                         <button 
@@ -412,7 +470,7 @@ export const StudentHome: React.FC = () => {
                        )}
                    </div>
 
-                   <p className="text-xs text-gray-500">扫码支付 ¥5.00 并点击下方按钮</p>
+                   <p className="text-xs text-gray-500">扫码支付后点击下方按钮</p>
                    <button onClick={handlePaymentComplete} disabled={loading} className={`w-full text-white font-bold py-3 rounded-lg transition-colors ${paymentMethod === 'wechat' ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
                        我已{paymentMethod === 'wechat' ? '微信' : '支付宝'}支付
                    </button>

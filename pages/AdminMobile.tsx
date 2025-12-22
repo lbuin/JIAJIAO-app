@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase, isConfigured } from '../lib/supabaseClient';
@@ -181,7 +182,10 @@ export const AdminMobile: React.FC = () => {
                         <div className="text-[10px] text-blue-800 font-bold uppercase mb-1">对接目标 (家长)</div>
                         <div className="text-sm font-bold text-blue-900">{order.jobs?.contact_name}</div>
                         <div className="text-lg font-mono text-blue-700 select-all">{order.jobs?.contact_phone}</div>
-                        <div className="text-xs text-blue-600 mt-1">{order.jobs?.title} ({order.jobs?.price})</div>
+                        <div className="text-xs text-blue-600 mt-1">
+                            {order.jobs?.title}<br/>
+                            <span className="text-[10px]">每周{order.jobs?.frequency || 1}次 ({order.jobs?.price})</span>
+                        </div>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                         <button onClick={() => handleRejectOrder(order.id)} className="py-2 bg-red-50 text-red-600 rounded-lg font-bold text-sm">不合适</button>
@@ -205,6 +209,9 @@ export const AdminMobile: React.FC = () => {
                     <div className="mb-4">
                         <div className="font-bold text-gray-800">{order.profile?.name || order.student_contact}</div>
                         <div className="text-sm text-gray-500">申请: {order.jobs?.title}</div>
+                        <div className="text-xs text-gray-500 mt-1">
+                             每周{order.jobs?.frequency}次 - {order.jobs?.price}
+                        </div>
                         <div className="text-xs text-gray-400 mt-1">学生电话: {order.student_contact}</div>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
@@ -224,7 +231,7 @@ export const AdminMobile: React.FC = () => {
                 <div key={job.id} className="bg-white rounded-2xl shadow-sm p-5 border border-gray-100">
                     <div className="mb-3">
                         <h3 className="font-bold text-lg text-gray-900 mb-1">{job.title}</h3>
-                        <p className="text-sm text-gray-500">{job.grade} {job.subject} · {job.price}</p>
+                        <p className="text-sm text-gray-500">{job.grade} {job.subject} · {job.price} · 每周{job.frequency}次</p>
                         <p className="text-xs text-gray-400 mt-1">发布人: {job.contact_name} ({job.contact_phone})</p>
                     </div>
                     <div className="grid grid-cols-2 gap-3">

@@ -1,9 +1,11 @@
+
 export interface Job {
   id: number;
   title: string;
   grade: string;
   subject: string;
   price: string;
+  frequency: number; // New field: Times per week
   address: string;
   contact_name: string;
   contact_phone: string;
@@ -53,6 +55,7 @@ export interface CreateJobParams {
   grade: string;
   subject: string;
   price: string;
+  frequency: number; // New field
   address: string;
   contact_name: string;
   contact_phone: string;

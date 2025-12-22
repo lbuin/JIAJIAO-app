@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { supabase, isConfigured } from '../lib/supabaseClient';
@@ -15,6 +16,7 @@ export const ParentPost: React.FC = () => {
     grade: '',
     subject: '',
     price: '',
+    frequency: 1, // Default to 1 time per week
     address: '',
     contact_name: '',
     contact_phone: ''
@@ -27,7 +29,7 @@ export const ParentPost: React.FC = () => {
     }
   }, [navigate]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
@@ -128,15 +130,30 @@ export const ParentPost: React.FC = () => {
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-bold text-gray-700 mb-1">价格预算 *</label>
-            <input 
-              name="price"
-              value={formData.price}
-              onChange={handleChange}
-              className="w-full border border-gray-300 rounded-lg p-3 outline-none"
-              placeholder="例如：100-150元/小时"
-            />
+          <div className="grid grid-cols-2 gap-4">
+             <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">每周次数 *</label>
+                <select 
+                    name="frequency"
+                    value={formData.frequency}
+                    onChange={handleChange}
+                    className="w-full border border-gray-300 rounded-lg p-3 outline-none bg-white"
+                >
+                    {[1,2,3,4,5,6,7].map(num => (
+                        <option key={num} value={num}>每周 {num} 次</option>
+                    ))}
+                </select>
+             </div>
+             <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">价格预算 *</label>
+                <input 
+                    name="price"
+                    value={formData.price}
+                    onChange={handleChange}
+                    className="w-full border border-gray-300 rounded-lg p-3 outline-none"
+                    placeholder="例如：100"
+                />
+             </div>
           </div>
 
           <div>
