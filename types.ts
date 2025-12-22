@@ -8,6 +8,7 @@ export interface Job {
   contact_name: string;
   contact_phone: string;
   is_active: boolean;
+  status?: 'pending' | 'published' | 'rejected'; // New field
   created_at?: string;
 }
 
