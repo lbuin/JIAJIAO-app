@@ -5,33 +5,43 @@ export const generateJobDetails = async (
   subject: string,
   requirements: string
 ): Promise<{ title: string; priceSuggestion: string }> => {
-  // Use process.env.API_KEY directly as per guidelines.
-  // The client initialization must use the key from the environment.
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
-  const prompt = `
-    You are an assistant for a Tutor Matching Platform.
-    Generate a catchy, professional Job Title (max 10 words) and a suggested Price Range (e.g., "$X - $Y / hour")
-    for a tutor job with the following details:
-    Grade: ${grade}
-    Subject: ${subject}
-    Extra Requirements: ${requirements}
-  `;
+  // @ts-ignore
+  const apiKey = process.env.API_KEY;
+  
+  if (!apiKey) {
+    console.warn("Gemini API Key missing. Returning fallback.");
+    // In production/China without proxy, this fallback is likely what will be shown
+    return {
+      title: `${grade}${subject}辅导`,
+      priceSuggestion: "¥100 - ¥200 / 小时"
+    };
+  }
 
   try {
+    const ai = new GoogleGenAI({ apiKey });
+
+    const prompt = `
+      You are an assistant for a Tutor Matching Platform in China.
+      Generate a catchy, professional Job Title (max 10 words, in Chinese) and a suggested Price Range (e.g., "¥X - ¥Y / 小时")
+      for a tutor job with the following details:
+      Grade: ${grade}
+      Subject: ${subject}
+      Extra Requirements: ${requirements}
+    `;
+
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-3-flash-preview', 
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
         responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING },
-            priceSuggestion: { type: Type.STRING },
-          },
-          required: ["title", "priceSuggestion"],
-        },
+            type: Type.OBJECT,
+            properties: {
+                title: { type: Type.STRING },
+                priceSuggestion: { type: Type.STRING }
+            },
+            required: ["title", "priceSuggestion"]
+        }
       }
     });
 
@@ -42,8 +52,8 @@ export const generateJobDetails = async (
   } catch (error) {
     console.error("Error generating job details:", error);
     return {
-      title: `${subject} Tutor for ${grade}`,
-      priceSuggestion: "$20 - $50 / hour"
+      title: `${grade}${subject}家教 (AI生成失败)`,
+      priceSuggestion: "¥100 - ¥150 / 小时"
     };
   }
 };

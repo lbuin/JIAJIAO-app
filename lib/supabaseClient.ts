@@ -1,31 +1,17 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// Helper to retrieve environment variables
+// Helper to retrieve environment variables compatible with Vite
 const getEnv = (key: string) => {
-  let val = '';
-  try {
-    if (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env[key]) {
-      val = (import.meta as any).env[key];
-    }
-  } catch (e) {}
-
-  if (!val) {
-    try {
-      if (typeof process !== 'undefined' && process.env && process.env[key]) {
-        val = process.env[key];
-      }
-    } catch (e) {}
+  // 1. Vite / Modern Standard
+  const meta = import.meta as any;
+  if (meta.env && meta.env[key]) {
+    return meta.env[key];
   }
-
-  if (!val) {
-    try {
-      if (typeof window !== 'undefined') {
-        val = localStorage.getItem(key) || '';
-      }
-    } catch (e) {}
+  // 2. LocalStorage Fallback
+  if (typeof window !== 'undefined') {
+    return localStorage.getItem(key) || '';
   }
-
-  return val ? val.trim() : '';
+  return '';
 };
 
 // Internal client reference
@@ -75,7 +61,6 @@ export const setupSupabase = (url: string, key: string) => {
  * Check if the client has valid (non-placeholder) credentials.
  */
 export const isConfigured = () => {
-  // We check the localStorage, current client source, or hardcoded defaults
   const url = getEnv('VITE_SUPABASE_URL') || HARDCODED_URL;
   const key = getEnv('VITE_SUPABASE_ANON_KEY') || HARDCODED_KEY;
   return !!(url && key && !url.includes('placeholder.supabase.co'));
@@ -83,8 +68,6 @@ export const isConfigured = () => {
 
 /**
  * Export a Proxy that always delegates to the `currentClient`.
- * This allows other files to import `supabase` once and have it work
- * even after we call `setupSupabase`.
  */
 export const supabase = new Proxy({} as SupabaseClient, {
   get: (_target, prop) => {
