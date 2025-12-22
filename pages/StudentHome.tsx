@@ -10,8 +10,8 @@ const LOCAL_STORAGE_CONTACT_KEY = 'tutor_match_student_contact';
 type Step = 'input_contact' | 'fill_profile' | 'show_qr';
 type PaymentMethod = 'wechat' | 'alipay';
 
-// --- 静态资源引用 ---
-// 直接引用 public 文件夹下的图片
+// --- 静态资源引用 (最稳健方案) ---
+// 图片文件将直接从项目的 public 文件夹读取，不依赖任何外部网络
 const WECHAT_QR = "/wechat-pay.jpg"; 
 const ALIPAY_QR = "/alipay.jpg";      
 
