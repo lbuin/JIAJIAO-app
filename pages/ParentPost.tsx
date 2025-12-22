@@ -17,7 +17,8 @@ export const ParentPost: React.FC = () => {
     price: '',
     address: '',
     contact_name: '',
-    contact_phone: ''
+    contact_phone: '',
+    manage_password: ''
   });
 
   useEffect(() => {
@@ -34,16 +35,16 @@ export const ParentPost: React.FC = () => {
 
   const handleSubmit = async () => {
     // Validation
-    if (!formData.title || !formData.contact_phone || !formData.price) {
-      return alert("请至少填写标题、价格和联系电话");
+    if (!formData.title || !formData.contact_phone || !formData.price || !formData.manage_password) {
+      return alert("请填写完整信息，包括管理密码");
     }
 
     setLoading(true);
     try {
       const { error } = await supabase.from('jobs').insert([{
         ...formData,
-        is_active: false, // Default to inactive until approved
-        status: 'pending' // Explicit pending status
+        is_active: false, // Default to inactive until approved by admin
+        status: 'pending' // Explicit pending status for admin review
       }]);
 
       if (error) {
@@ -66,11 +67,18 @@ export const ParentPost: React.FC = () => {
         </div>
         <h2 className="text-2xl font-bold text-gray-800 mb-2">提交成功！</h2>
         <p className="text-gray-600 mb-8 max-w-xs mx-auto">
-          您的家教需求已提交审核。管理员确认信息无误后，将展示在首页。
+          您的家教需求已提交审核。
+          <br/><br/>
+          <strong>请务必记住您的管理密码</strong>，后续您需要凭此密码和手机号登录后台筛选老师。
         </p>
-        <Link to="/" className="bg-black text-white px-6 py-3 rounded-xl font-bold hover:bg-gray-800 transition-colors">
-          返回首页
-        </Link>
+        <div className="space-y-3 w-full max-w-xs">
+            <Link to="/parent-login" className="block w-full bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 transition-colors">
+            去家长后台看看
+            </Link>
+            <Link to="/" className="block w-full bg-white border border-gray-300 text-gray-800 px-6 py-3 rounded-xl font-bold hover:bg-gray-50 transition-colors">
+            返回首页
+            </Link>
+        </div>
       </div>
     );
   }
@@ -86,7 +94,7 @@ export const ParentPost: React.FC = () => {
 
       <main className="p-5 max-w-lg mx-auto space-y-6">
         <div className="bg-blue-50 p-4 rounded-xl text-blue-800 text-sm">
-          👋 您好家长，请填写以下信息。为了保证质量，信息提交后需经过人工审核（通常 30 分钟内）。
+          📝 家长您好，请填写详细需求。发布后您可以在“家长后台”审核申请的学生。
         </div>
 
         <div className="space-y-4">
@@ -147,9 +155,9 @@ export const ParentPost: React.FC = () => {
           </div>
 
           <div className="pt-4 border-t border-gray-100">
-            <h3 className="font-bold text-gray-800 mb-3">联系方式 (仅付费学生可见)</h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
+            <h3 className="font-bold text-gray-800 mb-3">管理与联系</h3>
+            
+            <div className="mb-4">
                 <label className="block text-sm font-bold text-gray-700 mb-1">称呼</label>
                 <input 
                   name="contact_name"
@@ -158,18 +166,33 @@ export const ParentPost: React.FC = () => {
                   className="w-full border border-gray-300 rounded-lg p-3 outline-none"
                   placeholder="例如：张女士"
                 />
-              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">电话 *</label>
+                <label className="block text-sm font-bold text-gray-700 mb-1">手机号 *</label>
                 <input 
                   name="contact_phone"
                   value={formData.contact_phone}
                   onChange={handleChange}
                   className="w-full border border-gray-300 rounded-lg p-3 outline-none"
-                  placeholder="手机号码"
+                  placeholder="用于登录后台"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-blue-700 mb-1">管理密码 *</label>
+                <input 
+                  name="manage_password"
+                  value={formData.manage_password}
+                  onChange={handleChange}
+                  className="w-full border-2 border-blue-100 rounded-lg p-3 outline-none focus:border-blue-500 bg-blue-50/50"
+                  placeholder="设置后请牢记"
                 />
               </div>
             </div>
+            <p className="text-xs text-gray-500 mt-2">
+                * 手机号和管理密码将用于您后续登录“家长后台”，查看并筛选申请该职位的学生。
+            </p>
           </div>
         </div>
 

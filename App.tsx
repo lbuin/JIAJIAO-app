@@ -4,6 +4,7 @@ import { StudentHome } from './pages/StudentHome';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { AdminMobile } from './pages/AdminMobile';
 import { ParentPost } from './pages/ParentPost';
+import { ParentDashboard } from './pages/ParentDashboard';
 
 function App() {
   return (
@@ -11,9 +12,10 @@ function App() {
       <Routes>
         <Route path="/" element={<StudentHome />} />
         <Route path="/post" element={<ParentPost />} />
-        {/* Desktop Admin */}
+        <Route path="/parent-login" element={<ParentDashboard />} />
+        
+        {/* Admin Routes */}
         <Route path="/admin-secret-dashboard" element={<AdminDashboard />} />
-        {/* Mobile Secret Admin */}
         <Route path="/my-secret-admin-888" element={<AdminMobile />} />
       </Routes>
     </HashRouter>

@@ -14,11 +14,9 @@ export const StudentHome: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  
-  // Configuration State for Error Handling
+  const [configured, setConfigured] = useState(false);
   const [configUrl, setConfigUrl] = useState('');
   const [configKey, setConfigKey] = useState('');
-  const [configured, setConfigured] = useState(false);
   
   // Identity state
   const [studentContact, setStudentContact] = useState<string>(() => {
@@ -49,34 +47,24 @@ export const StudentHome: React.FC = () => {
   const fetchJobs = useCallback(async () => {
     setErrorMsg(null);
     try {
-      // CHANGED: Query based on 'status' = 'published'
-      // If your DB doesn't have status yet, this might fail unless you run migration.
-      // Fallback: also checking is_active for backward compatibility if needed, 
-      // but strict requirements asked for status='published'.
       const { data, error } = await supabase
         .from('jobs')
         .select('*')
-        .eq('status', 'published') // New filter
+        .eq('status', 'published')
         .order('created_at', { ascending: false });
 
       if (error) {
-        // Fallback for setups that haven't added the status column yet
+         // Graceful fallback for demo
         if (error.message.includes('column "status" does not exist')) {
-            const { data: fallbackData } = await supabase
-                .from('jobs')
-                .select('*')
-                .eq('is_active', true)
-                .order('created_at', { ascending: false });
+            const { data: fallbackData } = await supabase.from('jobs').select('*').eq('is_active', true);
             setJobs(fallbackData || []);
         } else {
-            console.error('Error fetching jobs:', error.message);
             setErrorMsg(error.message);
         }
       } else {
         setJobs(data || []);
       }
     } catch (err: any) {
-      console.error('Network/Unexpected error:', err);
       setErrorMsg(err.message || "连接数据库失败");
     }
   }, []);
@@ -84,178 +72,203 @@ export const StudentHome: React.FC = () => {
   const fetchOrders = useCallback(async (contact: string) => {
     if (!contact) return;
     try {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('orders')
         .select('*')
         .eq('student_contact', contact)
         .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('Error fetching orders:', error.message);
-      } else {
-        setOrders(data || []);
-      }
+      setOrders(data || []);
     } catch (err) {
-      console.error("Error fetching orders:", err);
+      console.error(err);
     }
   }, []);
 
   const handleSaveConfig = async () => {
-    const url = configUrl.trim();
-    const key = configKey.trim();
-
-    if (!url || !key) return alert("请输入 URL 和 Key");
-
-    try {
-      new URL(url);
-    } catch (e) {
-      return alert("URL 格式无效。请输入以 https:// 开头的有效地址");
-    }
-
-    setupSupabase(url, key);
+    if (!configUrl || !configKey) return alert("请输入配置");
+    setupSupabase(configUrl, configKey);
     setConfigured(true);
-    
     setLoading(true);
     await fetchJobs();
-    if (studentContact) {
-      await fetchOrders(studentContact);
-    }
+    if (studentContact) await fetchOrders(studentContact);
     setLoading(false);
   };
 
   useEffect(() => {
     const init = async () => {
-      if (!isConfigured()) {
-        setLoading(false);
-        return; 
-      }
+      if (!isConfigured()) { setLoading(false); return; }
       setLoading(true);
       await fetchJobs();
-      if (studentContact) {
-        await fetchOrders(studentContact);
-      }
+      if (studentContact) await fetchOrders(studentContact);
       setLoading(false);
     };
     init();
 
     if (isConfigured() && studentContact) {
-      const channel = supabase
-        .channel('student_orders')
-        .on(
-          'postgres_changes',
-          {
-            event: '*', 
-            schema: 'public', 
-            table: 'orders',
-            filter: `student_contact=eq.${studentContact}`
-          },
-          () => {
-            fetchOrders(studentContact);
-          }
+      const channel = supabase.channel('student_realtime')
+        .on('postgres_changes', 
+          { event: '*', schema: 'public', table: 'orders', filter: `student_contact=eq.${studentContact}` }, 
+          () => fetchOrders(studentContact)
         )
         .subscribe();
-
-      return () => {
-        supabase.removeChannel(channel);
-      };
+      return () => { supabase.removeChannel(channel); };
     }
   }, [studentContact, fetchJobs, fetchOrders, configured]);
 
-  const handleUnlockClick = (job: Job) => {
-    setTempContact(studentContact); 
-    setStep('input_contact');
-    setSelectedJob(job);
-    setExistingProfileName(null);
-  };
-
-  const checkProfileAndNext = async () => {
-    if (!tempContact) return alert("请输入您的手机号");
-    
-    setLoading(true);
-    try {
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('name')
-        .eq('phone', tempContact)
-        .maybeSingle();
-
-      if (error && error.code === '42P01') {
-          console.warn("Profiles table missing, skipping check.");
-          setStep('show_qr');
-      } else if (profile) {
-        setExistingProfileName(profile.name);
-        setStep('show_qr');
-      } else {
-        setStep('fill_profile');
-      }
-      
-      setStudentContact(tempContact);
-      localStorage.setItem(LOCAL_STORAGE_CONTACT_KEY, tempContact);
-
-    } catch (err) {
-      console.error(err);
-      setStep('show_qr');
-    }
-    setLoading(false);
-  };
-
-  const handleProfileSubmit = async () => {
-    if (!profileForm.name || !profileForm.school || !profileForm.major) {
-      return alert("请填写带 * 的必填项");
-    }
-
-    setLoading(true);
-    try {
-      const { error } = await supabase.from('profiles').upsert([
-        {
-          phone: tempContact,
-          ...profileForm
-        }
-      ], { onConflict: 'phone' });
-
-      if (error && error.code !== '42P01') {
-             alert("保存简历失败: " + error.message);
-      } else {
-        setStep('show_qr');
-      }
-    } catch (err: any) {
-      alert("Error: " + err.message);
-    }
-    setLoading(false);
-  };
-
-  const handlePaymentComplete = async () => {
-    if (!selectedJob || !studentContact) return;
-
-    setLoading(true);
-    try {
-      const { error } = await supabase.from('orders').insert([
-        {
-          job_id: selectedJob.id,
-          student_contact: studentContact,
-          status: OrderStatus.PENDING,
-        }
-      ]);
-
-      if (error) {
-        alert("创建订单失败: " + error.message);
-      } else {
-        await fetchOrders(studentContact);
-        setSelectedJob(null);
-      }
-    } catch (err: any) {
-      alert("网络错误: " + err.message);
-    }
-    setLoading(false);
-  };
-
+  // --- Logic Updated for New Flow ---
   const getOrderStatus = (jobId: number) => {
     const order = orders.find(o => o.job_id === jobId);
     return order ? order.status : undefined;
   };
 
-  const isMissingTables = errorMsg && (errorMsg.includes('Could not find the table') || errorMsg.includes('does not exist'));
-  const showConfigForm = !configured || (errorMsg && !isMissingTables);
+  const handleJobAction = (job: Job) => {
+    const status = getOrderStatus(job.id);
+    setSelectedJob(job);
+    setTempContact(studentContact);
+
+    // If already approved by parent, show payment QR immediately
+    if (status === OrderStatus.PARENT_APPROVED) {
+        setStep('show_qr');
+    } else {
+        // Otherwise start with contact/profile check to Apply
+        setStep('input_contact');
+    }
+  };
+
+  const checkProfileAndNext = async () => {
+    if (!tempContact) return alert("请输入您的手机号");
+    setLoading(true);
+    try {
+      const { data: profile, error } = await supabase.from('profiles').select('name').eq('phone', tempContact).maybeSingle();
+      
+      if (error && error.code === '42P01') {
+          console.warn("Table missing, skipping.");
+          submitApplication(); // Fallback
+          return;
+      }
+
+      if (profile) {
+        // Profile exists, skip form, submit application directly
+        setStudentContact(tempContact);
+        localStorage.setItem(LOCAL_STORAGE_CONTACT_KEY, tempContact);
+        await submitApplication(tempContact);
+      } else {
+        // New profile needed
+        setStudentContact(tempContact);
+        localStorage.setItem(LOCAL_STORAGE_CONTACT_KEY, tempContact);
+        setStep('fill_profile');
+      }
+    } catch (err) {
+      console.error(err);
+      setStep('fill_profile');
+    }
+    setLoading(false);
+  };
+
+  // Step 2: Save Profile -> Then Apply
+  const handleProfileSubmit = async () => {
+    if (!profileForm.name || !profileForm.school) return alert("请填写必填项");
+    setLoading(true);
+    try {
+      await supabase.from('profiles').upsert([{ phone: tempContact, ...profileForm }], { onConflict: 'phone' });
+      await submitApplication(tempContact);
+    } catch (err: any) {
+      alert("错误: " + err.message);
+    }
+    setLoading(false);
+  };
+
+  // Helper: Create 'applying' order
+  const submitApplication = async (contact = studentContact) => {
+    if (!selectedJob) return;
+    
+    // Check if order exists (e.g. rejected before?) or create new
+    // We assume simplistic flow: insert new 'applying' order
+    // But if we use insert, we might duplicate. Upsert based on job_id+student_contact is better but needs DB constraint.
+    // For now, we will just insert. The UI prevents double clicking usually.
+    
+    const { error } = await supabase.from('orders').insert([{
+        job_id: selectedJob.id,
+        student_contact: contact,
+        status: OrderStatus.APPLYING 
+    }]);
+
+    if (error) {
+        alert("申请失败: " + error.message);
+    } else {
+        alert("✅ 申请成功！请等待家长确认。\n家长同意后，您将看到付款选项。");
+        setSelectedJob(null); // Close modal
+        fetchOrders(contact);
+    }
+  };
+
+  // Step 3: Payment (Only available if status was PARENT_APPROVED)
+  const handlePaymentComplete = async () => {
+      if (!selectedJob || !studentContact) return;
+      
+      // We need to update the EXISTING order, not create new one
+      const order = orders.find(o => o.job_id === selectedJob.id);
+      if (!order) return;
+
+      setLoading(true);
+      const { error } = await supabase
+        .from('orders')
+        .update({ status: OrderStatus.PAYMENT_PENDING })
+        .eq('id', order.id);
+
+      if (error) alert("更新失败: " + error.message);
+      else {
+          alert("已确认付款，请等待管理员最终放号。");
+          setSelectedJob(null);
+          fetchOrders(studentContact);
+      }
+      setLoading(false);
+  };
+
+  // Modified JobCard Wrapper to handle text
+  const renderJobButton = (job: Job, status?: OrderStatus) => {
+      if (status === OrderStatus.FINAL_APPROVED) {
+        return (
+            <div className="mt-4 bg-green-50 border border-green-100 rounded-lg p-3 animate-fade-in">
+                <div className="flex items-center gap-2 text-green-700 font-bold mb-1">
+                <IconLock className="w-4 h-4" /> <span>联系方式已解锁</span>
+                </div>
+                <p className="text-gray-800 text-sm"><span className="font-semibold">联系人:</span> {job.contact_name}</p>
+                <p className="text-gray-800 text-lg font-mono"><span className="font-semibold text-sm font-sans">电话:</span> {job.contact_phone}</p>
+            </div>
+        );
+      }
+
+      let btnText = "立即接单 / 申请";
+      let btnClass = "bg-black text-white hover:bg-gray-800";
+      let disabled = false;
+
+      if (status === OrderStatus.APPLYING) {
+          btnText = "已申请，等待家长确认...";
+          btnClass = "bg-yellow-100 text-yellow-800";
+          disabled = true;
+      } else if (status === OrderStatus.PARENT_APPROVED) {
+          btnText = "家长已同意！点击付款获取电话";
+          btnClass = "bg-green-600 text-white animate-pulse shadow-lg shadow-green-200";
+      } else if (status === OrderStatus.PAYMENT_PENDING) {
+          btnText = "付款确认中，请稍候...";
+          btnClass = "bg-blue-100 text-blue-800";
+          disabled = true;
+      } else if (status === OrderStatus.REJECTED) {
+          btnText = "家长觉得不合适 (已拒绝)";
+          btnClass = "bg-gray-100 text-gray-400";
+          disabled = true;
+      }
+
+      return (
+        <button
+            onClick={() => handleJobAction(job)}
+            disabled={disabled}
+            className={`w-full mt-4 py-3 rounded-xl font-bold text-sm transition-all ${btnClass}`}
+        >
+            {btnText}
+        </button>
+      );
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20">
@@ -263,107 +276,92 @@ export const StudentHome: React.FC = () => {
         <div className="max-w-2xl mx-auto px-4 h-16 flex items-center justify-between">
           <h1 className="text-xl font-bold text-gray-800 tracking-tight">家教信息平台</h1>
           <div className="flex gap-2 items-center">
-            {studentContact ? (
-              <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
-                {studentContact.slice(-4)}
-              </span>
-            ) : null}
-            <Link to="/post" className="bg-black text-white text-xs px-3 py-1.5 rounded-full font-bold hover:bg-gray-800 transition-colors">
-                我是家长
-            </Link>
+             {studentContact && <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">{studentContact.slice(-4)}</span>}
+             <Link to="/post" className="bg-black text-white text-xs px-3 py-1.5 rounded-full font-bold hover:bg-gray-800 transition-colors">我是家长</Link>
+             <Link to="/parent-login" className="text-xs text-gray-500 hover:text-gray-800 px-1">后台</Link>
           </div>
         </div>
       </header>
 
       <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
-        {showConfigForm && (
-          <div className="bg-white border border-red-200 rounded-xl shadow-lg p-6 max-w-lg mx-auto animate-fade-in">
-             {/* Config Form Omitted for Brevity - Same as before */}
-             <div className="text-center mb-6">
-               <h3 className={`font-bold text-xl mb-2 ${!configured ? 'text-gray-800' : 'text-red-700'}`}>
-                 {!configured ? '欢迎使用' : '连接失败'}
-               </h3>
-               <p className="text-gray-600">
-                  {!configured ? "请先配置 Supabase 数据库连接。" : errorMsg}
-               </p>
-            </div>
-            <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 space-y-4">
-                <input className="w-full border p-2 rounded text-sm" placeholder="Supabase URL" value={configUrl} onChange={e => setConfigUrl(e.target.value)} />
-                <input type="password" className="w-full border p-2 rounded text-sm" placeholder="Supabase Key" value={configKey} onChange={e => setConfigKey(e.target.value)} />
-                <button onClick={handleSaveConfig} className="w-full bg-blue-600 text-white font-bold py-2 rounded">保存并连接</button>
-            </div>
-          </div>
-        )}
-
-        {configured && loading && !errorMsg ? (
-          <div className="text-center text-gray-400 py-10">正在加载需求列表...</div>
-        ) : (
-          !isMissingTables && jobs.map(job => (
-            <JobCard 
-              key={job.id} 
-              job={job} 
-              orderStatus={getOrderStatus(job.id)}
-              onUnlockClick={handleUnlockClick}
-            />
-          ))
-        )}
+        {showConfigForm(configured, errorMsg, setConfigUrl, setConfigKey, handleSaveConfig)}
         
-        {configured && !loading && !errorMsg && !isMissingTables && jobs.length === 0 && (
-          <div className="text-center text-gray-500 py-10">
-            暂无已发布的需求。
-          </div>
-        )}
-
-        <div className="mt-12 mb-6 flex justify-center opacity-50 hover:opacity-100 transition-opacity">
-            <Link to="/my-secret-admin-888" className="flex items-center gap-2 text-xs text-gray-300 hover:text-gray-500 transition-colors px-4 py-2 rounded-full hover:bg-gray-100">
-                <IconLock className="w-3 h-3" />
-                <span>管理员入口</span>
-            </Link>
+        {configured && loading && !errorMsg ? <div className="text-center text-gray-400 py-10">加载中...</div> : 
+         jobs.map(job => (
+            <div key={job.id} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                <div className="flex justify-between items-start mb-2">
+                    <h3 className="text-lg font-bold text-gray-800 line-clamp-2">{job.title}</h3>
+                    <span className="bg-blue-50 text-blue-700 text-xs font-bold px-2 py-1 rounded">{job.subject}</span>
+                </div>
+                <div className="space-y-1 text-sm text-gray-600">
+                    <p><span className="font-medium">年级:</span> {job.grade}</p>
+                    <p><span className="font-medium">价格:</span> {job.price}</p>
+                    <p><span className="font-medium">地址:</span> {job.address}</p>
+                </div>
+                {renderJobButton(job, getOrderStatus(job.id))}
+            </div>
+         ))
+        }
+        
+        {configured && !loading && jobs.length === 0 && <div className="text-center text-gray-500 py-10">暂无需求</div>}
+        
+        <div className="mt-12 text-center">
+            <Link to="/my-secret-admin-888" className="text-xs text-gray-300 hover:text-gray-500">管理员入口</Link>
         </div>
       </main>
 
-      {/* Modal - Same as before */}
+      {/* MODAL */}
       {selectedJob && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl animate-fade-in my-auto">
-            <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-              <h3 className="font-bold text-lg text-gray-800">
-                {step === 'input_contact' ? '身份验证' : step === 'fill_profile' ? '完善简历' : '确认支付'}
-              </h3>
-              <button onClick={() => setSelectedJob(null)} className="text-gray-400 hover:text-gray-600"><IconX /></button>
-            </div>
-            <div className="p-6">
-              {step === 'input_contact' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl p-6 relative">
+            <button onClick={() => setSelectedJob(null)} className="absolute top-4 right-4 text-gray-400"><IconX/></button>
+            <h3 className="font-bold text-lg text-gray-800 mb-4">
+                {step === 'input_contact' ? '申请接单' : step === 'fill_profile' ? '完善简历' : '支付信息费'}
+            </h3>
+
+            {step === 'input_contact' && (
                 <div className="space-y-4">
-                   <p className="text-sm text-gray-600">请输入手机号，以便我们核实身份。</p>
-                   <input type="text" placeholder="手机号码" className="w-full border border-gray-300 rounded-lg p-3 outline-none" value={tempContact} onChange={(e) => setTempContact(e.target.value)}/>
-                   <button onClick={checkProfileAndNext} disabled={loading} className="w-full bg-blue-600 text-white font-semibold py-3 rounded-lg hover:bg-blue-700 disabled:opacity-50">{loading ? '查询中...' : '下一步'}</button>
+                   <p className="text-sm text-gray-600">请输入手机号。家长同意后，您才需要支付信息费。</p>
+                   <input type="text" placeholder="手机号码" className="w-full border p-3 rounded-lg outline-none" value={tempContact} onChange={e=>setTempContact(e.target.value)}/>
+                   <button onClick={checkProfileAndNext} disabled={loading} className="w-full bg-blue-600 text-white font-bold py-3 rounded-lg">下一步</button>
                 </div>
-              )}
-              {step === 'fill_profile' && (
+            )}
+            {step === 'fill_profile' && (
                 <div className="space-y-3">
-                   <p className="text-xs text-yellow-600 bg-yellow-50 p-2 rounded mb-2">请简单完善您的家教简历。</p>
-                   <input className="w-full border p-2 rounded text-sm" placeholder="姓名 *" value={profileForm.name} onChange={e => setProfileForm({...profileForm, name: e.target.value})} />
-                   <input className="w-full border p-2 rounded text-sm" placeholder="学校 *" value={profileForm.school} onChange={e => setProfileForm({...profileForm, school: e.target.value})} />
-                   <input className="w-full border p-2 rounded text-sm" placeholder="专业 *" value={profileForm.major} onChange={e => setProfileForm({...profileForm, major: e.target.value})} />
-                   <input className="w-full border p-2 rounded text-sm" placeholder="年级" value={profileForm.grade} onChange={e => setProfileForm({...profileForm, grade: e.target.value})} />
-                   <textarea className="w-full border p-2 rounded text-sm h-20" placeholder="经验" value={profileForm.experience} onChange={e => setProfileForm({...profileForm, experience: e.target.value})} />
-                   <button onClick={handleProfileSubmit} disabled={loading} className="w-full bg-black text-white font-semibold py-3 rounded-lg hover:bg-gray-800 mt-2 disabled:opacity-50">{loading ? '保存中...' : '保存并继续'}</button>
+                   <p className="text-xs text-yellow-600 bg-yellow-50 p-2 rounded">完善简历让家长更容易选择您。</p>
+                   <input className="w-full border p-2 rounded text-sm" placeholder="姓名 *" value={profileForm.name} onChange={e=>setProfileForm({...profileForm, name:e.target.value})} />
+                   <input className="w-full border p-2 rounded text-sm" placeholder="学校 *" value={profileForm.school} onChange={e=>setProfileForm({...profileForm, school:e.target.value})} />
+                   <input className="w-full border p-2 rounded text-sm" placeholder="专业" value={profileForm.major} onChange={e=>setProfileForm({...profileForm, major:e.target.value})} />
+                   <input className="w-full border p-2 rounded text-sm" placeholder="年级" value={profileForm.grade} onChange={e=>setProfileForm({...profileForm, grade:e.target.value})} />
+                   <textarea className="w-full border p-2 rounded text-sm h-20" placeholder="简单经验介绍..." value={profileForm.experience} onChange={e=>setProfileForm({...profileForm, experience:e.target.value})} />
+                   <button onClick={handleProfileSubmit} disabled={loading} className="w-full bg-black text-white font-bold py-3 rounded-lg">提交申请</button>
                 </div>
-              )}
-              {step === 'show_qr' && (
-                <div className="text-center space-y-5">
-                   {existingProfileName && <div className="bg-green-50 text-green-700 p-2 rounded text-sm mb-2">欢迎回来，{existingProfileName}同学</div>}
-                   <div className="bg-blue-50 p-4 rounded-xl inline-block">
-                     <img src="https://picsum.photos/200/200?grayscale" alt="Payment QR" className="w-48 h-48 rounded-lg object-cover mix-blend-multiply" />
-                   </div>
-                   <button onClick={handlePaymentComplete} disabled={loading} className="w-full bg-green-600 text-white font-semibold py-3 rounded-lg hover:bg-green-700 disabled:opacity-50">{loading ? '处理中...' : '我已付款'}</button>
+            )}
+            {step === 'show_qr' && (
+                <div className="text-center space-y-4">
+                   <p className="text-sm text-green-700 font-bold">家长已同意接触！</p>
+                   <div className="bg-gray-100 p-4 rounded-xl inline-block"><img src="https://picsum.photos/200/200?grayscale" className="w-40 h-40 mix-blend-multiply" /></div>
+                   <p className="text-xs text-gray-500">扫码支付 ¥5.00 获取联系电话</p>
+                   <button onClick={handlePaymentComplete} disabled={loading} className="w-full bg-green-600 text-white font-bold py-3 rounded-lg">我已付款</button>
                 </div>
-              )}
-            </div>
+            )}
           </div>
         </div>
       )}
     </div>
   );
 };
+
+// Helper for config form UI to keep main component clean
+const showConfigForm = (configured: boolean, errorMsg: string|null, setUrl: any, setKey: any, handleSave: any) => {
+    if (configured && !errorMsg) return null;
+    return (
+        <div className="bg-white border border-red-200 rounded-xl shadow-lg p-6 mb-4">
+            <h3 className="font-bold text-red-700 mb-2">连接配置</h3>
+            <p className="text-sm text-gray-600 mb-4">{errorMsg || "请输入 Supabase 连接信息"}</p>
+            <input className="w-full border p-2 rounded mb-2 text-sm" placeholder="URL" onChange={e=>setUrl(e.target.value)}/>
+            <input type="password" className="w-full border p-2 rounded mb-4 text-sm" placeholder="Key" onChange={e=>setKey(e.target.value)}/>
+            <button onClick={handleSave} className="w-full bg-red-600 text-white font-bold py-2 rounded">连接</button>
+        </div>
+    )
+}
