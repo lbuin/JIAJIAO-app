@@ -48,8 +48,8 @@ create table if not exists public.system_settings (
 );
 -- Seed Default Settings
 insert into public.system_settings (key, value) values 
-('wechat_pay_url', 'https://via.placeholder.com/200x200?text=WeChat'),
-('alipay_url', 'https://via.placeholder.com/200x200?text=Alipay')
+('wechat_pay_url', '/wechat-pay.jpg'),
+('alipay_url', '/alipay.jpg')
 on conflict (key) do nothing;
 
 -- 5. Enable Realtime
