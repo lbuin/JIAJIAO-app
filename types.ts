@@ -42,6 +42,11 @@ export interface StudentProfile {
   major: string;
   grade: string;
   experience: string;
+  
+  // New Preferences
+  preferred_grades?: string;   // e.g. "初一,初二"
+  preferred_subjects?: string; // e.g. "数学,英语"
+  
   created_at?: string;
 }
 

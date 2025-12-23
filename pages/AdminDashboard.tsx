@@ -42,7 +42,9 @@ create table if not exists public.profiles (
   school text,
   major text,
   grade text,
-  experience text
+  experience text,
+  preferred_grades text,
+  preferred_subjects text
 );
 
 -- 4. Enable Realtime
@@ -52,6 +54,10 @@ alter publication supabase_realtime add table orders;
 const MIGRATION_SQL = `
 -- 【数据库升级】仅运行一次 (如果你之前的 jobs 表没有 frequency 字段)
 alter table public.jobs add column if not exists frequency integer default 1;
+
+-- 【数据库升级 V2】添加偏好设置字段 (运行一次)
+alter table public.profiles add column if not exists preferred_grades text;
+alter table public.profiles add column if not exists preferred_subjects text;
 `;
 
 type Tab = 'applications' | 'finance';

@@ -3,7 +3,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase, isConfigured, setupSupabase } from '../lib/supabaseClient';
 import { Job, Order, OrderStatus, StudentProfile, OrderWithDetails } from '../types';
-import { IconX, IconLock, IconHome, IconClipboard, IconUserPlus } from '../components/Icons';
+import { IconX, IconLock, IconHome, IconClipboard, IconUserPlus, IconUser, IconEdit, IconStar } from '../components/Icons';
 
 const LOCAL_STORAGE_CONTACT_KEY = 'tutor_match_student_contact';
 
@@ -34,7 +34,11 @@ export const StudentHome: React.FC = () => {
     return localStorage.getItem(LOCAL_STORAGE_CONTACT_KEY) || '';
   });
 
-  // Modal State
+  // User Profile State
+  const [myProfile, setMyProfile] = useState<StudentProfile | null>(null);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+
+  // Modal State for Applying
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [step, setStep] = useState<Step>('input_contact');
   const [tempContact, setTempContact] = useState(studentContact);
@@ -43,9 +47,9 @@ export const StudentHome: React.FC = () => {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('wechat');
   const [calculatedFee, setCalculatedFee] = useState<{ hours: number, amount: number, note: string }>({ hours: 0, amount: 0, note: '' });
 
-  // Profile Form
+  // Profile Form (Used for both initial application and editing)
   const [profileForm, setProfileForm] = useState<Omit<StudentProfile, 'id' | 'created_at' | 'phone'>>({
-    name: '', school: '', major: '', grade: '', experience: ''
+    name: '', school: '', major: '', grade: '', experience: '', preferred_grades: '', preferred_subjects: ''
   });
 
   useEffect(() => {
@@ -86,11 +90,30 @@ export const StudentHome: React.FC = () => {
     }
   }, []);
 
+  const fetchProfile = useCallback(async (contact: string) => {
+      if (!contact) return;
+      const { data } = await supabase.from('profiles').select('*').eq('phone', contact).maybeSingle();
+      if (data) {
+          setMyProfile(data);
+          // Pre-fill form in case they edit
+          setProfileForm({
+              name: data.name || '',
+              school: data.school || '',
+              major: data.major || '',
+              grade: data.grade || '',
+              experience: data.experience || '',
+              preferred_grades: data.preferred_grades || '',
+              preferred_subjects: data.preferred_subjects || ''
+          });
+      }
+  }, []);
+
   const handleLogout = () => {
     if (confirm("确定要切换账号吗？")) {
       localStorage.removeItem(LOCAL_STORAGE_CONTACT_KEY);
       setStudentContact('');
       setOrders([]);
+      setMyProfile(null);
       window.location.reload();
     }
   };
@@ -100,7 +123,10 @@ export const StudentHome: React.FC = () => {
       if (!isConfigured()) { setLoading(false); return; }
       setLoading(true);
       await fetchJobs();
-      if (studentContact) await fetchOrders(studentContact);
+      if (studentContact) {
+          await fetchOrders(studentContact);
+          await fetchProfile(studentContact);
+      }
       setLoading(false);
     };
     init();
@@ -114,7 +140,22 @@ export const StudentHome: React.FC = () => {
         .subscribe();
       return () => { supabase.removeChannel(channel); };
     }
-  }, [studentContact, fetchJobs, fetchOrders, configured]);
+  }, [studentContact, fetchJobs, fetchOrders, fetchProfile, configured]);
+
+  // --- Matching Logic ---
+  const isRecommended = (job: Job) => {
+      if (!myProfile) return false;
+      
+      const prefGrades = (myProfile.preferred_grades || "").split(/[,，\s]+/).filter(Boolean);
+      const prefSubjects = (myProfile.preferred_subjects || "").split(/[,，\s]+/).filter(Boolean);
+      
+      if (prefGrades.length === 0 && prefSubjects.length === 0) return false;
+
+      const gradeMatch = prefGrades.some(g => job.grade.includes(g) || job.title.includes(g));
+      const subjectMatch = prefSubjects.some(s => job.subject.includes(s) || job.title.includes(s));
+
+      return gradeMatch || subjectMatch;
+  };
 
   // --- Fee Calculation ---
   const calculateInfoFee = (job: Job) => {
@@ -183,12 +224,23 @@ export const StudentHome: React.FC = () => {
     setLoading(false);
   };
 
-  const handleProfileSubmit = async () => {
+  const handleProfileSubmit = async (isEditMode = false) => {
     if (!profileForm.name || !profileForm.school) return alert("请填写必填项");
+    
     setLoading(true);
+    const contactToUse = isEditMode ? studentContact : tempContact;
+    
     try {
-      await supabase.from('profiles').upsert([{ phone: tempContact, ...profileForm }], { onConflict: 'phone' });
-      await submitApplication(tempContact);
+      const { error } = await supabase.from('profiles').upsert([{ phone: contactToUse, ...profileForm }], { onConflict: 'phone' });
+      if (error) throw error;
+
+      if (isEditMode) {
+          alert("✅ 个人简历与偏好已更新！");
+          setIsProfileModalOpen(false);
+          fetchProfile(contactToUse);
+      } else {
+          await submitApplication(contactToUse);
+      }
     } catch (err: any) {
       alert("错误: " + err.message);
     }
@@ -238,12 +290,22 @@ export const StudentHome: React.FC = () => {
   // Reusable Component for Job Content
   const JobContent = ({ job, orderStatus }: { job: Job, orderStatus?: OrderStatus }) => {
      const isCompleted = orderStatus === OrderStatus.FINAL_APPROVED;
+     const recommended = !orderStatus && isRecommended(job);
      
      return (
-        <div className={`bg-white rounded-xl shadow-sm border p-5 transition-all ${isCompleted ? 'border-green-200 bg-green-50/20' : 'border-gray-100'}`}>
+        <div className={`bg-white rounded-xl shadow-sm border p-5 transition-all ${isCompleted ? 'border-green-200 bg-green-50/20' : recommended ? 'border-orange-200 bg-orange-50/10' : 'border-gray-100'}`}>
             <div className="flex justify-between items-start mb-2">
-                <h3 className="text-lg font-bold text-gray-800 line-clamp-2">{job.title}</h3>
-                <span className="bg-blue-50 text-blue-700 text-xs font-bold px-2 py-1 rounded">{job.subject}</span>
+                <div className="flex-1">
+                    <h3 className="text-lg font-bold text-gray-800 line-clamp-2 flex items-center gap-2">
+                        {job.title}
+                        {recommended && (
+                            <span className="inline-flex items-center gap-1 bg-gradient-to-r from-orange-400 to-red-500 text-white text-[10px] px-2 py-0.5 rounded-full font-bold shadow-sm">
+                                <IconStar className="w-3 h-3" /> 推荐
+                            </span>
+                        )}
+                    </h3>
+                </div>
+                <span className="ml-2 bg-blue-50 text-blue-700 text-xs font-bold px-2 py-1 rounded shrink-0">{job.subject}</span>
             </div>
             <div className="space-y-1 text-sm text-gray-600">
                 <p><span className="font-medium">年级:</span> {job.grade}</p>
@@ -301,6 +363,50 @@ export const StudentHome: React.FC = () => {
   const appliedJobIds = new Set(orders.map(o => o.job_id));
   const marketplaceJobs = jobs.filter(j => !appliedJobIds.has(j.id));
 
+  // Profile Form Component
+  const ProfileFormFields = () => (
+      <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+                <label className="text-xs text-gray-500 font-bold">姓名 *</label>
+                <input className="w-full border p-2 rounded text-sm bg-gray-50" placeholder="姓名" value={profileForm.name} onChange={e=>setProfileForm({...profileForm, name:e.target.value})} />
+            </div>
+             <div>
+                <label className="text-xs text-gray-500 font-bold">学校 *</label>
+                <input className="w-full border p-2 rounded text-sm bg-gray-50" placeholder="学校" value={profileForm.school} onChange={e=>setProfileForm({...profileForm, school:e.target.value})} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+             <div>
+                 <label className="text-xs text-gray-500 font-bold">专业</label>
+                 <input className="w-full border p-2 rounded text-sm bg-gray-50" placeholder="专业" value={profileForm.major} onChange={e=>setProfileForm({...profileForm, major:e.target.value})} />
+             </div>
+             <div>
+                 <label className="text-xs text-gray-500 font-bold">年级</label>
+                 <input className="w-full border p-2 rounded text-sm bg-gray-50" placeholder="年级" value={profileForm.grade} onChange={e=>setProfileForm({...profileForm, grade:e.target.value})} />
+             </div>
+          </div>
+          <div>
+              <label className="text-xs text-gray-500 font-bold">家教经验</label>
+              <textarea className="w-full border p-2 rounded text-sm bg-gray-50 h-20" placeholder="简单经验介绍..." value={profileForm.experience} onChange={e=>setProfileForm({...profileForm, experience:e.target.value})} />
+          </div>
+
+          <div className="pt-2 border-t border-gray-100">
+             <h4 className="text-sm font-bold text-orange-600 mb-2 flex items-center gap-1"><IconStar className="w-4 h-4" /> 偏好设置 (用于自动推荐)</h4>
+             <div className="space-y-2">
+                 <div>
+                    <label className="text-xs text-gray-500 font-bold">偏好科目 (逗号分隔)</label>
+                    <input className="w-full border border-orange-200 p-2 rounded text-sm bg-orange-50/20" placeholder="例如: 数学, 英语, 物理" value={profileForm.preferred_subjects} onChange={e=>setProfileForm({...profileForm, preferred_subjects:e.target.value})} />
+                 </div>
+                 <div>
+                    <label className="text-xs text-gray-500 font-bold">偏好年级 (逗号分隔)</label>
+                    <input className="w-full border border-orange-200 p-2 rounded text-sm bg-orange-50/20" placeholder="例如: 初一, 高中" value={profileForm.preferred_grades} onChange={e=>setProfileForm({...profileForm, preferred_grades:e.target.value})} />
+                 </div>
+             </div>
+          </div>
+      </div>
+  );
+
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
       <header className="bg-white shadow-sm sticky top-0 z-10">
@@ -313,7 +419,6 @@ export const StudentHome: React.FC = () => {
                     <button onClick={handleLogout} className="bg-gray-200 hover:bg-gray-300 rounded-full p-1 w-5 h-5 flex items-center justify-center"><IconX className="w-3 h-3" /></button>
                 </div>
              ) : <span className="text-xs text-gray-400">未登录</span>}
-             {/* "I am parent" link removed from here */}
           </div>
         </div>
       </header>
@@ -347,7 +452,14 @@ export const StudentHome: React.FC = () => {
         {/* --- TAB 2: MY ORDERS --- */}
         {activeTab === 'orders' && (
             <section className="animate-fade-in">
-                <h2 className="text-sm font-bold text-gray-500 mb-3 px-1 uppercase tracking-wider">我的申请 / 订单</h2>
+                <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-sm font-bold text-gray-500 px-1 uppercase tracking-wider">我的申请 / 订单</h2>
+                    {studentContact && (
+                        <button onClick={() => setIsProfileModalOpen(true)} className="flex items-center gap-1 bg-white border border-gray-200 shadow-sm px-3 py-1.5 rounded-full text-xs font-bold text-gray-700 hover:bg-gray-50 transition-colors">
+                            <IconUser className="w-3 h-3" /> 个人简历与偏好
+                        </button>
+                    )}
+                </div>
                 
                 {!studentContact ? (
                     <div className="text-center py-20 text-gray-500 bg-white rounded-xl border border-dashed">
@@ -375,7 +487,7 @@ export const StudentHome: React.FC = () => {
                     </div>
                 )}
 
-                {/* CUSTOMER SERVICE SECTION (Visible only in Orders tab now to reduce clutter on home) */}
+                {/* CUSTOMER SERVICE SECTION */}
                 <div className="mt-8 bg-white rounded-xl p-4 shadow-sm border border-blue-100 flex items-center justify-between">
                     <div className="flex flex-col">
                         <span className="font-bold text-gray-800 text-sm">需要帮助？</span>
@@ -427,7 +539,7 @@ export const StudentHome: React.FC = () => {
         </div>
       </div>
 
-      {/* MODAL (Content unchanged) */}
+      {/* APPLY MODAL */}
       {selectedJob && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl p-6 relative animate-scale-up">
@@ -444,14 +556,10 @@ export const StudentHome: React.FC = () => {
                 </div>
             )}
             {step === 'fill_profile' && (
-                <div className="space-y-3">
+                <div className="space-y-4">
                    <p className="text-xs text-yellow-600 bg-yellow-50 p-2 rounded">完善简历让管理员更快为您匹配。</p>
-                   <input className="w-full border p-2 rounded text-sm" placeholder="姓名 *" value={profileForm.name} onChange={e=>setProfileForm({...profileForm, name:e.target.value})} />
-                   <input className="w-full border p-2 rounded text-sm" placeholder="学校 *" value={profileForm.school} onChange={e=>setProfileForm({...profileForm, school:e.target.value})} />
-                   <input className="w-full border p-2 rounded text-sm" placeholder="专业" value={profileForm.major} onChange={e=>setProfileForm({...profileForm, major:e.target.value})} />
-                   <input className="w-full border p-2 rounded text-sm" placeholder="年级" value={profileForm.grade} onChange={e=>setProfileForm({...profileForm, grade:e.target.value})} />
-                   <textarea className="w-full border p-2 rounded text-sm h-20" placeholder="简单经验介绍..." value={profileForm.experience} onChange={e=>setProfileForm({...profileForm, experience:e.target.value})} />
-                   <button onClick={handleProfileSubmit} disabled={loading} className="w-full bg-black text-white font-bold py-3 rounded-lg">提交申请</button>
+                   <ProfileFormFields />
+                   <button onClick={() => handleProfileSubmit(false)} disabled={loading} className="w-full bg-black text-white font-bold py-3 rounded-lg">提交申请</button>
                 </div>
             )}
             {step === 'show_qr' && (
@@ -478,6 +586,25 @@ export const StudentHome: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* EDIT PROFILE MODAL */}
+      {isProfileModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl p-6 relative animate-scale-up">
+              <button onClick={() => setIsProfileModalOpen(false)} className="absolute top-4 right-4 text-gray-400"><IconX/></button>
+              <div className="flex items-center gap-2 mb-4">
+                  <IconEdit className="w-5 h-5 text-gray-800" />
+                  <h3 className="font-bold text-lg text-gray-800">编辑简历与偏好</h3>
+              </div>
+              
+              <div className="space-y-4">
+                 <ProfileFormFields />
+                 <button onClick={() => handleProfileSubmit(true)} disabled={loading} className="w-full bg-black text-white font-bold py-3 rounded-lg">保存修改</button>
+              </div>
+            </div>
+          </div>
+      )}
+
     </div>
   );
 };
