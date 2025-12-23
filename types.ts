@@ -7,6 +7,7 @@ export interface Job {
   price: string;
   frequency: number; // New field: Times per week
   address: string;
+  sex_requirement?: 'male' | 'female' | 'unlimited'; // New: Gender requirement
   contact_name: string;
   contact_phone: string;
   manage_password?: string; // Optional/Deprecated
@@ -38,6 +39,7 @@ export interface StudentProfile {
   id?: number;
   phone: string;
   password?: string; // New: Security field
+  gender?: 'male' | 'female'; // New: Student gender
   name: string;
   school: string;
   major: string;
@@ -63,6 +65,7 @@ export interface CreateJobParams {
   price: string;
   frequency: number; // New field
   address: string;
+  sex_requirement: 'male' | 'female' | 'unlimited'; // New
   contact_name: string;
   contact_phone: string;
   // manage_password removed

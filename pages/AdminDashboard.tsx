@@ -18,6 +18,7 @@ create table if not exists public.jobs (
   price text,
   frequency integer default 1,
   address text,
+  sex_requirement text default 'unlimited',
   contact_name text,
   contact_phone text,
   is_active boolean default true,
@@ -39,6 +40,7 @@ create table if not exists public.profiles (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   phone text unique not null,
   password text, 
+  gender text,
   name text,
   school text,
   major text,
@@ -62,6 +64,10 @@ alter table public.profiles add column if not exists preferred_subjects text;
 
 -- 【数据库升级 V3】添加密码字段 (运行一次)
 alter table public.profiles add column if not exists password text;
+
+-- 【数据库升级 V4 - 2025】添加性别字段 (运行一次)
+alter table public.profiles add column if not exists gender text;
+alter table public.jobs add column if not exists sex_requirement text default 'unlimited';
 `;
 
 type Tab = 'applications' | 'finance';
@@ -87,6 +93,7 @@ export const AdminDashboard: React.FC = () => {
     price: '',
     frequency: 1,
     address: '',
+    sex_requirement: 'unlimited',
     contact_name: '管理员',
     contact_phone: ''
   });
@@ -238,6 +245,7 @@ export const AdminDashboard: React.FC = () => {
       price: newJob.price,
       frequency: newJob.frequency,
       address: newJob.address,
+      sex_requirement: newJob.sex_requirement,
       contact_name: newJob.contact_name,
       contact_phone: newJob.contact_phone,
       is_active: true,
@@ -245,15 +253,15 @@ export const AdminDashboard: React.FC = () => {
     }]);
 
     if (error) {
-        if (error.message?.includes('frequency')) {
-            alert("发布失败：数据库缺少 frequency 字段。\n请点击下方的 '数据库维护命令' 并运行升级 SQL。");
+        if (error.message?.includes('frequency') || error.message?.includes('sex_requirement')) {
+            alert("发布失败：数据库字段缺失。\n请点击下方的 '数据库维护命令' 并运行升级 SQL。");
         } else {
             alert("创建失败: " + error.message);
         }
     } else {
       alert("需求发布成功！");
       setNewJob({
-        grade: '', subject: '', title: '', price: '', frequency: 1, address: '', contact_name: '管理员', contact_phone: ''
+        grade: '', subject: '', title: '', price: '', frequency: 1, address: '', sex_requirement: 'unlimited', contact_name: '管理员', contact_phone: ''
       });
     }
   };
@@ -348,7 +356,7 @@ export const AdminDashboard: React.FC = () => {
                                 <div>
                                     <div className="font-bold text-gray-800 text-lg">{job.title}</div>
                                     <div className="text-xs text-gray-500 mt-1">
-                                        价格: {job.price} | 频率: 每周{job.frequency}次 | 家长: {job.contact_name}
+                                        价格: {job.price} | 性别要求: {job.sex_requirement === 'male' ? '男' : job.sex_requirement === 'female' ? '女' : '不限'} | 家长: {job.contact_name}
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-3">
@@ -485,7 +493,14 @@ export const AdminDashboard: React.FC = () => {
                   {[1,2,3,4,5,6,7].map(n => <option key={n} value={n}>每周{n}次</option>)}
                </select>
                <input className="border p-2 rounded text-sm" placeholder="价格 (如: 150)" value={newJob.price} onChange={e => setNewJob({...newJob, price: e.target.value})} />
-               <input className="border p-2 rounded text-sm" placeholder="地址 (如: 海淀区)" value={newJob.address} onChange={e => setNewJob({...newJob, address: e.target.value})} />
+               <select className="border p-2 rounded text-sm bg-white" value={newJob.sex_requirement} onChange={e => setNewJob({...newJob, sex_requirement: e.target.value})}>
+                  <option value="unlimited">性别不限</option>
+                  <option value="male">仅限男生</option>
+                  <option value="female">仅限女生</option>
+               </select>
+             </div>
+             <div className="grid grid-cols-2 gap-4">
+                <input className="col-span-2 border p-2 rounded text-sm" placeholder="地址 (如: 海淀区)" value={newJob.address} onChange={e => setNewJob({...newJob, address: e.target.value})} />
              </div>
              <div className="grid grid-cols-2 gap-4 bg-gray-50 p-3 rounded">
                 <input className="border p-2 rounded text-sm" placeholder="联系人" value={newJob.contact_name} onChange={e => setNewJob({...newJob, contact_name: e.target.value})} />

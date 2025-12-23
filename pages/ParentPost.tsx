@@ -43,6 +43,7 @@ export const ParentPost: React.FC = () => {
     price: '',
     frequency: 1,
     address: '',
+    sex_requirement: 'unlimited',
     contact_name: '',
     contact_phone: ''
   });
@@ -138,7 +139,7 @@ export const ParentPost: React.FC = () => {
       alert("发布成功！请等待管理员审核。");
       // Reset form (except phone)
       setFormData({
-        title: '', grade: '', subject: '', price: '', frequency: 1, address: '', contact_name: '', contact_phone: parentPhone
+        title: '', grade: '', subject: '', price: '', frequency: 1, address: '', sex_requirement: 'unlimited', contact_name: '', contact_phone: parentPhone
       });
       setView('dashboard');
     } catch (err: any) {
@@ -156,6 +157,12 @@ export const ParentPost: React.FC = () => {
       case 'rejected': return <span className="bg-red-100 text-red-600 px-2 py-0.5 rounded text-xs font-bold">审核未通过</span>;
       default: return <span className="bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded text-xs font-bold">审核中</span>;
     }
+  };
+
+  const getGenderText = (req?: string) => {
+      if (req === 'male') return '限男生';
+      if (req === 'female') return '限女生';
+      return '性别不限';
   };
 
   // --- VIEW 1: LOGIN (Phone Entry) ---
@@ -216,7 +223,8 @@ export const ParentPost: React.FC = () => {
                         {getStatusBadge(job.status)}
                     </div>
                     <div className="text-xs text-gray-500 space-y-1">
-                        <p>{job.grade} {job.subject} · {job.price}</p>
+                        <p>{job.grade} {job.subject} · <span className="text-red-500 font-bold">{job.price}</span></p>
+                        <p>{getGenderText(job.sex_requirement)} · 每周{job.frequency}次</p>
                         <p className="text-gray-400">{new Date(job.created_at || '').toLocaleString()}</p>
                     </div>
                     
@@ -300,6 +308,19 @@ export const ParentPost: React.FC = () => {
 
           <div className="grid grid-cols-2 gap-4">
              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">性别要求 *</label>
+                <select 
+                    name="sex_requirement"
+                    value={formData.sex_requirement}
+                    onChange={handleFormChange}
+                    className="w-full border border-gray-300 rounded-lg p-3 outline-none bg-white"
+                >
+                    <option value="unlimited">性别不限</option>
+                    <option value="male">仅限男生</option>
+                    <option value="female">仅限女生</option>
+                </select>
+             </div>
+             <div>
                 <label className="block text-sm font-bold text-gray-700 mb-1">每周次数 *</label>
                 <select 
                     name="frequency"
@@ -312,16 +333,17 @@ export const ParentPost: React.FC = () => {
                     ))}
                 </select>
              </div>
-             <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">价格预算 *</label>
-                <input 
-                    name="price"
-                    value={formData.price}
-                    onChange={handleFormChange}
-                    className="w-full border border-gray-300 rounded-lg p-3 outline-none"
-                    placeholder="例如：100"
-                />
-             </div>
+          </div>
+
+          <div>
+             <label className="block text-sm font-bold text-gray-700 mb-1">价格预算 *</label>
+             <input 
+                name="price"
+                value={formData.price}
+                onChange={handleFormChange}
+                className="w-full border border-gray-300 rounded-lg p-3 outline-none"
+                placeholder="例如：100 (元/小时)"
+            />
           </div>
 
           <div>
