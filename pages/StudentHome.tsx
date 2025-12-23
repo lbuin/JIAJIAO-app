@@ -3,7 +3,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase, isConfigured, setupSupabase } from '../lib/supabaseClient';
 import { Job, Order, OrderStatus, StudentProfile, OrderWithDetails } from '../types';
-import { IconX, IconLock, IconHome, IconClipboard, IconUserPlus, IconUser, IconEdit, IconStar } from '../components/Icons';
+import { IconX, IconLock, IconHome, IconClipboard, IconUserPlus, IconUser, IconEdit, IconStar, IconPlus, IconCheck } from '../components/Icons';
 
 const LOCAL_STORAGE_CONTACT_KEY = 'tutor_match_student_contact';
 
@@ -14,6 +14,15 @@ type Tab = 'market' | 'orders';
 const WECHAT_QR = "/wechat-pay.jpg"; 
 const ALIPAY_QR = "/alipay.jpg";      
 const CUSTOMER_SERVICE_QQ = "1400470321";
+
+// Constants for Preferences
+const SUGGESTED_GRADES = [
+  '小学', '初一', '初二', '初三', '高一', '高二', '高三'
+];
+
+const SUGGESTED_SUBJECTS = [
+  '全科', '数学', '英语', '语文', '物理', '化学', '科学', '编程', '钢琴'
+];
 
 export const StudentHome: React.FC = () => {
   const navigate = useNavigate();
@@ -37,6 +46,7 @@ export const StudentHome: React.FC = () => {
   // User Profile State
   const [myProfile, setMyProfile] = useState<StudentProfile | null>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false); // Standalone Login Modal
 
   // Modal State for Applying
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
@@ -114,6 +124,7 @@ export const StudentHome: React.FC = () => {
       setStudentContact('');
       setOrders([]);
       setMyProfile(null);
+      setTempContact('');
       window.location.reload();
     }
   };
@@ -190,31 +201,68 @@ export const StudentHome: React.FC = () => {
   };
 
   const handleJobAction = (job: Job) => {
-    const order = orders.find(o => o.job_id === job.id);
-    const status = order?.status;
-
-    setSelectedJob(job);
-    setTempContact(studentContact);
-    setCalculatedFee(calculateInfoFee(job));
-
-    if (status === OrderStatus.PARENT_APPROVED) {
-        setStep('show_qr');
-    } else {
+    // If not logged in, prompt login flow via the apply modal
+    if (!studentContact) {
         setStep('input_contact');
+        setTempContact('');
+    } else {
+        // If logged in, check if applying or just need to show status
+        const order = orders.find(o => o.job_id === job.id);
+        const status = order?.status;
+
+        setTempContact(studentContact);
+
+        if (status === OrderStatus.PARENT_APPROVED) {
+            setStep('show_qr');
+        } else {
+            // Already applied check
+            if (status && status !== OrderStatus.REJECTED) {
+                 // Should not happen due to button state, but safe guard
+                 return alert("您已申请该职位");
+            }
+            // New Application
+            // We skip input_contact since we have it, check profile directly
+            checkProfileAndNext(true); // pass true to skip phone input UI
+            // But we need to set selectedJob first
+        }
     }
+    setSelectedJob(job);
+    setCalculatedFee(calculateInfoFee(job));
   };
 
-  const checkProfileAndNext = async () => {
-    if (!tempContact) return alert("请输入您的手机号");
+  // Handle Standalone Login from Orders Tab
+  const handleLoginClick = () => {
+      setStep('input_contact');
+      setTempContact('');
+      setIsLoginModalOpen(true);
+  };
+
+  const checkProfileAndNext = async (skipInput = false) => {
+    const contactToCheck = skipInput ? studentContact : tempContact;
+    if (!contactToCheck) return alert("请输入您的手机号");
+    
     setLoading(true);
     try {
-      const { data: profile } = await supabase.from('profiles').select('name').eq('phone', tempContact).maybeSingle();
-      setStudentContact(tempContact);
-      localStorage.setItem(LOCAL_STORAGE_CONTACT_KEY, tempContact);
+      const { data: profile } = await supabase.from('profiles').select('name').eq('phone', contactToCheck).maybeSingle();
+      
+      // Update global state if this was a login action
+      setStudentContact(contactToCheck);
+      localStorage.setItem(LOCAL_STORAGE_CONTACT_KEY, contactToCheck);
 
       if (profile) {
-        await submitApplication(tempContact);
+        // Profile exists
+        if (isLoginModalOpen) {
+             // Just logging in
+             setIsLoginModalOpen(false);
+             fetchOrders(contactToCheck);
+             fetchProfile(contactToCheck);
+             alert("登录成功");
+        } else {
+             // Applying for job
+             await submitApplication(contactToCheck);
+        }
       } else {
+        // Profile missing -> Go to fill profile
         setStep('fill_profile');
       }
     } catch (err) {
@@ -228,17 +276,28 @@ export const StudentHome: React.FC = () => {
     if (!profileForm.name || !profileForm.school) return alert("请填写必填项");
     
     setLoading(true);
-    const contactToUse = isEditMode ? studentContact : tempContact;
+    // If editing, use logged in contact. If new flow, use tempContact.
+    const contactToUse = (isEditMode || studentContact) ? studentContact : tempContact;
     
     try {
       const { error } = await supabase.from('profiles').upsert([{ phone: contactToUse, ...profileForm }], { onConflict: 'phone' });
       if (error) throw error;
 
+      // Update Local State
+      setStudentContact(contactToUse);
+      localStorage.setItem(LOCAL_STORAGE_CONTACT_KEY, contactToUse);
+      await fetchProfile(contactToUse);
+
       if (isEditMode) {
           alert("✅ 个人简历与偏好已更新！");
           setIsProfileModalOpen(false);
-          fetchProfile(contactToUse);
+      } else if (isLoginModalOpen) {
+          // Finished profile creation during login
+          setIsLoginModalOpen(false);
+          fetchOrders(contactToUse);
+          alert("注册成功！");
       } else {
+          // Finished profile creation during application
           await submitApplication(contactToUse);
       }
     } catch (err: any) {
@@ -266,8 +325,6 @@ export const StudentHome: React.FC = () => {
         alert("✅ 申请成功！请等待审核。");
         setSelectedJob(null);
         fetchOrders(contact);
-        // Optional: switch tab to orders to show feedback
-        // setActiveTab('orders'); 
     }
   };
 
@@ -363,7 +420,25 @@ export const StudentHome: React.FC = () => {
   const appliedJobIds = new Set(orders.map(o => o.job_id));
   const marketplaceJobs = jobs.filter(j => !appliedJobIds.has(j.id));
 
-  // Profile Form Component
+  // --- Profile Form Component with Tags ---
+  const ToggleTag = ({ label, selected, onClick }: { label: string, selected: boolean, onClick: () => void }) => (
+      <button 
+        onClick={onClick}
+        className={`px-3 py-1.5 rounded-lg text-xs font-bold mr-2 mb-2 transition-colors border ${selected ? 'bg-blue-600 text-white border-blue-600' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
+      >
+        {label} {selected && <IconCheck className="w-3 h-3 inline ml-1"/>}
+      </button>
+  );
+
+  const togglePreference = (current: string | undefined, item: string) => {
+      const items = (current || '').split(/[,，\s]+/).filter(Boolean);
+      if (items.includes(item)) {
+          return items.filter(i => i !== item).join(',');
+      } else {
+          return [...items, item].join(',');
+      }
+  };
+
   const ProfileFormFields = () => (
       <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
@@ -392,16 +467,48 @@ export const StudentHome: React.FC = () => {
           </div>
 
           <div className="pt-2 border-t border-gray-100">
-             <h4 className="text-sm font-bold text-orange-600 mb-2 flex items-center gap-1"><IconStar className="w-4 h-4" /> 偏好设置 (用于自动推荐)</h4>
-             <div className="space-y-2">
-                 <div>
-                    <label className="text-xs text-gray-500 font-bold">偏好科目 (逗号分隔)</label>
-                    <input className="w-full border border-orange-200 p-2 rounded text-sm bg-orange-50/20" placeholder="例如: 数学, 英语, 物理" value={profileForm.preferred_subjects} onChange={e=>setProfileForm({...profileForm, preferred_subjects:e.target.value})} />
-                 </div>
-                 <div>
-                    <label className="text-xs text-gray-500 font-bold">偏好年级 (逗号分隔)</label>
-                    <input className="w-full border border-orange-200 p-2 rounded text-sm bg-orange-50/20" placeholder="例如: 初一, 高中" value={profileForm.preferred_grades} onChange={e=>setProfileForm({...profileForm, preferred_grades:e.target.value})} />
-                 </div>
+             <h4 className="text-sm font-bold text-orange-600 mb-2 flex items-center gap-1"><IconStar className="w-4 h-4" /> 偏好设置 (自动推荐)</h4>
+             
+             {/* Subjects */}
+             <div className="mb-3">
+                <label className="text-xs text-gray-500 font-bold block mb-1">偏好科目 (多选)</label>
+                <div className="flex flex-wrap mb-1">
+                    {SUGGESTED_SUBJECTS.map(subj => (
+                        <ToggleTag 
+                            key={subj} 
+                            label={subj} 
+                            selected={(profileForm.preferred_subjects || '').includes(subj)}
+                            onClick={() => setProfileForm({...profileForm, preferred_subjects: togglePreference(profileForm.preferred_subjects, subj)})}
+                        />
+                    ))}
+                </div>
+                <input 
+                    className="w-full border border-orange-200 p-2 rounded text-xs bg-orange-50/20 placeholder-orange-300" 
+                    placeholder="手动补充 (如: 奥数, 德语)" 
+                    value={profileForm.preferred_subjects} 
+                    onChange={e=>setProfileForm({...profileForm, preferred_subjects:e.target.value})} 
+                />
+             </div>
+
+             {/* Grades */}
+             <div>
+                <label className="text-xs text-gray-500 font-bold block mb-1">偏好年级 (多选)</label>
+                <div className="flex flex-wrap mb-1">
+                    {SUGGESTED_GRADES.map(grade => (
+                        <ToggleTag 
+                            key={grade} 
+                            label={grade} 
+                            selected={(profileForm.preferred_grades || '').includes(grade)}
+                            onClick={() => setProfileForm({...profileForm, preferred_grades: togglePreference(profileForm.preferred_grades, grade)})}
+                        />
+                    ))}
+                </div>
+                <input 
+                    className="w-full border border-orange-200 p-2 rounded text-xs bg-orange-50/20 placeholder-orange-300" 
+                    placeholder="手动补充 (如: 小学全科)" 
+                    value={profileForm.preferred_grades} 
+                    onChange={e=>setProfileForm({...profileForm, preferred_grades:e.target.value})} 
+                />
              </div>
           </div>
       </div>
@@ -418,7 +525,7 @@ export const StudentHome: React.FC = () => {
                     <span className="text-xs text-gray-500 mr-2">{studentContact.slice(-4)}</span>
                     <button onClick={handleLogout} className="bg-gray-200 hover:bg-gray-300 rounded-full p-1 w-5 h-5 flex items-center justify-center"><IconX className="w-3 h-3" /></button>
                 </div>
-             ) : <span className="text-xs text-gray-400">未登录</span>}
+             ) : <button onClick={handleLoginClick} className="text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-full">登录/注册</button>}
           </div>
         </div>
       </header>
@@ -462,8 +569,15 @@ export const StudentHome: React.FC = () => {
                 </div>
                 
                 {!studentContact ? (
-                    <div className="text-center py-20 text-gray-500 bg-white rounded-xl border border-dashed">
-                        <p>请输入手机号或申请一个职位来查看订单</p>
+                    <div className="flex flex-col items-center justify-center py-20 bg-white rounded-xl border border-dashed border-gray-300">
+                        <IconLock className="w-12 h-12 text-gray-300 mb-4" />
+                        <p className="text-gray-500 mb-6 font-medium">请先登录以查看您的订单和管理简历</p>
+                        <button 
+                            onClick={handleLoginClick}
+                            className="bg-black text-white px-8 py-3 rounded-xl font-bold text-sm hover:scale-105 transition-transform shadow-lg"
+                        >
+                            立即登录 / 注册
+                        </button>
                     </div>
                 ) : orders.length === 0 ? (
                     <div className="text-center py-20 text-gray-400 bg-white rounded-xl border border-dashed">
@@ -539,30 +653,37 @@ export const StudentHome: React.FC = () => {
         </div>
       </div>
 
-      {/* APPLY MODAL */}
-      {selectedJob && (
+      {/* APPLY / LOGIN MODAL */}
+      {(selectedJob || isLoginModalOpen) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl p-6 relative animate-scale-up">
-            <button onClick={() => setSelectedJob(null)} className="absolute top-4 right-4 text-gray-400"><IconX/></button>
+            <button onClick={() => { setSelectedJob(null); setIsLoginModalOpen(false); }} className="absolute top-4 right-4 text-gray-400"><IconX/></button>
+            
             <h3 className="font-bold text-lg text-gray-800 mb-4">
-                {step === 'input_contact' ? '申请接单' : step === 'fill_profile' ? '完善简历' : '支付信息费'}
+                {isLoginModalOpen ? (step === 'fill_profile' ? '完善资料以注册' : '登录 / 注册') : (step === 'input_contact' ? '申请接单' : step === 'fill_profile' ? '完善简历' : '支付信息费')}
             </h3>
 
             {step === 'input_contact' && (
                 <div className="space-y-4">
-                   <p className="text-sm text-gray-600">请输入手机号。匹配成功后，您才需要支付信息费。</p>
+                   <p className="text-sm text-gray-600">
+                       {isLoginModalOpen ? "请输入手机号进行登录或注册。" : "请输入手机号。匹配成功后，您才需要支付信息费。"}
+                   </p>
                    <input type="text" placeholder="手机号码" className="w-full border p-3 rounded-lg outline-none" value={tempContact} onChange={e=>setTempContact(e.target.value)}/>
-                   <button onClick={checkProfileAndNext} disabled={loading} className="w-full bg-blue-600 text-white font-bold py-3 rounded-lg">下一步</button>
+                   <button onClick={() => checkProfileAndNext(false)} disabled={loading} className="w-full bg-blue-600 text-white font-bold py-3 rounded-lg">下一步</button>
                 </div>
             )}
             {step === 'fill_profile' && (
                 <div className="space-y-4">
-                   <p className="text-xs text-yellow-600 bg-yellow-50 p-2 rounded">完善简历让管理员更快为您匹配。</p>
+                   <p className="text-xs text-yellow-600 bg-yellow-50 p-2 rounded">
+                       {isLoginModalOpen ? "初次登录，请完善您的基本信息。" : "完善简历让管理员更快为您匹配。"}
+                   </p>
                    <ProfileFormFields />
-                   <button onClick={() => handleProfileSubmit(false)} disabled={loading} className="w-full bg-black text-white font-bold py-3 rounded-lg">提交申请</button>
+                   <button onClick={() => handleProfileSubmit(false)} disabled={loading} className="w-full bg-black text-white font-bold py-3 rounded-lg">
+                       {isLoginModalOpen ? "完成注册" : "提交申请"}
+                   </button>
                 </div>
             )}
-            {step === 'show_qr' && (
+            {step === 'show_qr' && selectedJob && (
                 <div className="text-center space-y-4">
                    <p className="text-sm text-green-700 font-bold">匹配成功！请支付信息费</p>
                    <div className="bg-blue-50 border border-blue-100 p-3 rounded-lg text-left mb-2">
