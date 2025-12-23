@@ -37,6 +37,7 @@ export interface Order {
 export interface StudentProfile {
   id?: number;
   phone: string;
+  password?: string; // New: Security field
   name: string;
   school: string;
   major: string;

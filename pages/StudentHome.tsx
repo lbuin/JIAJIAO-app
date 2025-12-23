@@ -7,7 +7,7 @@ import { IconX, IconLock, IconHome, IconClipboard, IconUserPlus, IconUser, IconE
 
 const LOCAL_STORAGE_CONTACT_KEY = 'tutor_match_student_contact';
 
-type Step = 'input_contact' | 'fill_profile' | 'show_qr';
+type Step = 'input_contact' | 'input_password' | 'fill_profile' | 'show_qr';
 type PaymentMethod = 'wechat' | 'alipay';
 type Tab = 'market' | 'orders';
 
@@ -52,6 +52,8 @@ export const StudentHome: React.FC = () => {
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [step, setStep] = useState<Step>('input_contact');
   const [tempContact, setTempContact] = useState(studentContact);
+  const [tempPassword, setTempPassword] = useState(''); // For password check
+  const [cachedProfileForAuth, setCachedProfileForAuth] = useState<StudentProfile | null>(null); // To store profile during auth flow
 
   // Payment
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('wechat');
@@ -59,7 +61,7 @@ export const StudentHome: React.FC = () => {
 
   // Profile Form (Used for both initial application and editing)
   const [profileForm, setProfileForm] = useState<Omit<StudentProfile, 'id' | 'created_at' | 'phone'>>({
-    name: '', school: '', major: '', grade: '', experience: '', preferred_grades: '', preferred_subjects: ''
+    name: '', school: '', major: '', grade: '', experience: '', preferred_grades: '', preferred_subjects: '', password: ''
   });
 
   useEffect(() => {
@@ -113,18 +115,20 @@ export const StudentHome: React.FC = () => {
               grade: data.grade || '',
               experience: data.experience || '',
               preferred_grades: data.preferred_grades || '',
-              preferred_subjects: data.preferred_subjects || ''
+              preferred_subjects: data.preferred_subjects || '',
+              password: data.password || '' // Should keep current password
           });
       }
   }, []);
 
   const handleLogout = () => {
-    if (confirm("确定要切换账号吗？")) {
+    if (confirm("确定要退出登录吗？")) {
       localStorage.removeItem(LOCAL_STORAGE_CONTACT_KEY);
       setStudentContact('');
       setOrders([]);
       setMyProfile(null);
       setTempContact('');
+      setTempPassword('');
       window.location.reload();
     }
   };
@@ -221,9 +225,9 @@ export const StudentHome: React.FC = () => {
                  return alert("您已申请该职位");
             }
             // New Application
-            // We skip input_contact since we have it, check profile directly
-            checkProfileAndNext(true); // pass true to skip phone input UI
-            // But we need to set selectedJob first
+            // Pass true to indicate we are already logged in so skip phone check
+            handleDirectApply();
+            return;
         }
     }
     setSelectedJob(job);
@@ -234,46 +238,85 @@ export const StudentHome: React.FC = () => {
   const handleLoginClick = () => {
       setStep('input_contact');
       setTempContact('');
+      setTempPassword('');
       setIsLoginModalOpen(true);
   };
 
-  const checkProfileAndNext = async (skipInput = false) => {
-    const contactToCheck = skipInput ? studentContact : tempContact;
-    if (!contactToCheck) return alert("请输入您的手机号");
+  const handleDirectApply = () => {
+      setSelectedJob(prev => prev); // keep selected
+      setStep('show_qr'); // Placeholder, actually we want to submit
+      // Since we are logged in, just submit
+      submitApplication(studentContact);
+  };
+
+  const checkPhoneAndProceed = async () => {
+    if (!tempContact) return alert("请输入您的手机号");
     
     setLoading(true);
     try {
-      const { data: profile } = await supabase.from('profiles').select('name').eq('phone', contactToCheck).maybeSingle();
+      const { data: profile } = await supabase.from('profiles').select('*').eq('phone', tempContact).maybeSingle();
       
-      // Update global state if this was a login action
-      setStudentContact(contactToCheck);
-      localStorage.setItem(LOCAL_STORAGE_CONTACT_KEY, contactToCheck);
-
       if (profile) {
-        // Profile exists
-        if (isLoginModalOpen) {
-             // Just logging in
-             setIsLoginModalOpen(false);
-             fetchOrders(contactToCheck);
-             fetchProfile(contactToCheck);
-             alert("登录成功");
-        } else {
-             // Applying for job
-             await submitApplication(contactToCheck);
-        }
+        // Profile exists -> Ask for password
+        setCachedProfileForAuth(profile);
+        setStep('input_password');
       } else {
-        // Profile missing -> Go to fill profile
+        // Profile missing -> Go to fill profile (Register)
         setStep('fill_profile');
       }
     } catch (err) {
       console.error(err);
+      // If error, default to register to be safe
       setStep('fill_profile');
     }
     setLoading(false);
   };
 
+  const handleLoginSubmit = async () => {
+      if (!tempPassword) return alert("请输入密码");
+      
+      if (!cachedProfileForAuth || !cachedProfileForAuth.password) {
+          // Fallback: If no password set in DB (old user), let them in or force update.
+          // For now, if no password in DB, we treat empty input as valid or just let them in?
+          // Let's enforce strictness: If they have no password in DB, they should have gone to register/update flow?
+          // Actually, if legacy user has no password, let's allow them to set it.
+          // For simplicity: We only matched passwords if it exists.
+           if (cachedProfileForAuth && !cachedProfileForAuth.password) {
+               alert("您的账号尚未设置密码，请联系管理员或重新注册");
+               return;
+           }
+      }
+
+      if (cachedProfileForAuth?.password !== tempPassword) {
+          alert("密码错误");
+          return;
+      }
+
+      // Login Success
+      finalizeLogin(cachedProfileForAuth.phone);
+  };
+
+  const finalizeLogin = async (phone: string) => {
+      setStudentContact(phone);
+      localStorage.setItem(LOCAL_STORAGE_CONTACT_KEY, phone);
+      
+      await fetchOrders(phone);
+      await fetchProfile(phone);
+
+      if (isLoginModalOpen) {
+          setIsLoginModalOpen(false);
+          alert("登录成功");
+      } else {
+          // Was applying
+          if (selectedJob) {
+             await submitApplication(phone);
+          }
+      }
+  };
+
   const handleProfileSubmit = async (isEditMode = false) => {
     if (!profileForm.name || !profileForm.school) return alert("请填写必填项");
+    if (!isEditMode && !profileForm.password) return alert("请设置登录密码");
     
     setLoading(true);
     // If editing, use logged in contact. If new flow, use tempContact.
@@ -439,7 +482,7 @@ export const StudentHome: React.FC = () => {
       }
   };
 
-  const ProfileFormFields = () => (
+  const ProfileFormFields = ({ isEditMode = false }) => (
       <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -451,6 +494,15 @@ export const StudentHome: React.FC = () => {
                 <input className="w-full border p-2 rounded text-sm bg-gray-50" placeholder="学校" value={profileForm.school} onChange={e=>setProfileForm({...profileForm, school:e.target.value})} />
             </div>
           </div>
+
+          {/* Password Field (Only show for new registrations or if explicit edit requested) */}
+          {!isEditMode && (
+             <div>
+                <label className="text-xs text-gray-500 font-bold">设置登录密码 *</label>
+                <input type="password" className="w-full border p-2 rounded text-sm bg-gray-50" placeholder="请设置您的登录密码" value={profileForm.password} onChange={e=>setProfileForm({...profileForm, password:e.target.value})} />
+             </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
              <div>
                  <label className="text-xs text-gray-500 font-bold">专业</label>
@@ -660,29 +712,55 @@ export const StudentHome: React.FC = () => {
             <button onClick={() => { setSelectedJob(null); setIsLoginModalOpen(false); }} className="absolute top-4 right-4 text-gray-400"><IconX/></button>
             
             <h3 className="font-bold text-lg text-gray-800 mb-4">
-                {isLoginModalOpen ? (step === 'fill_profile' ? '完善资料以注册' : '登录 / 注册') : (step === 'input_contact' ? '申请接单' : step === 'fill_profile' ? '完善简历' : '支付信息费')}
+                {isLoginModalOpen 
+                    ? (step === 'fill_profile' ? '完善资料以注册' : step === 'input_password' ? '输入密码登录' : '登录 / 注册') 
+                    : (step === 'input_contact' ? '申请接单' : step === 'input_password' ? '验证身份' : step === 'fill_profile' ? '完善简历' : '支付信息费')
+                }
             </h3>
 
+            {/* STEP 1: INPUT PHONE */}
             {step === 'input_contact' && (
                 <div className="space-y-4">
                    <p className="text-sm text-gray-600">
                        {isLoginModalOpen ? "请输入手机号进行登录或注册。" : "请输入手机号。匹配成功后，您才需要支付信息费。"}
                    </p>
                    <input type="text" placeholder="手机号码" className="w-full border p-3 rounded-lg outline-none" value={tempContact} onChange={e=>setTempContact(e.target.value)}/>
-                   <button onClick={() => checkProfileAndNext(false)} disabled={loading} className="w-full bg-blue-600 text-white font-bold py-3 rounded-lg">下一步</button>
+                   <button onClick={checkPhoneAndProceed} disabled={loading} className="w-full bg-blue-600 text-white font-bold py-3 rounded-lg">下一步</button>
                 </div>
             )}
+
+            {/* STEP 2: INPUT PASSWORD (LOGIN) */}
+            {step === 'input_password' && (
+                <div className="space-y-4">
+                    <p className="text-sm text-gray-600">欢迎回来，请输入您的登录密码。</p>
+                    <div className="bg-gray-50 p-3 rounded-lg text-sm text-gray-800 font-bold mb-2">
+                        账号: {tempContact}
+                    </div>
+                    <input 
+                        type="password" 
+                        placeholder="密码" 
+                        className="w-full border p-3 rounded-lg outline-none focus:ring-2 focus:ring-blue-500" 
+                        value={tempPassword} 
+                        onChange={e=>setTempPassword(e.target.value)}
+                    />
+                    <button onClick={handleLoginSubmit} disabled={loading} className="w-full bg-black text-white font-bold py-3 rounded-lg">登录</button>
+                </div>
+            )}
+
+            {/* STEP 3: FILL PROFILE (REGISTER) */}
             {step === 'fill_profile' && (
                 <div className="space-y-4">
                    <p className="text-xs text-yellow-600 bg-yellow-50 p-2 rounded">
-                       {isLoginModalOpen ? "初次登录，请完善您的基本信息。" : "完善简历让管理员更快为您匹配。"}
+                       {isLoginModalOpen ? "初次登录，请设置密码并完善信息。" : "完善简历让管理员更快为您匹配。"}
                    </p>
-                   <ProfileFormFields />
+                   <ProfileFormFields isEditMode={false} />
                    <button onClick={() => handleProfileSubmit(false)} disabled={loading} className="w-full bg-black text-white font-bold py-3 rounded-lg">
                        {isLoginModalOpen ? "完成注册" : "提交申请"}
                    </button>
                 </div>
             )}
+
+            {/* STEP 4: SHOW QR (PAYMENT) */}
             {step === 'show_qr' && selectedJob && (
                 <div className="text-center space-y-4">
                    <p className="text-sm text-green-700 font-bold">匹配成功！请支付信息费</p>
@@ -719,7 +797,7 @@ export const StudentHome: React.FC = () => {
               </div>
               
               <div className="space-y-4">
-                 <ProfileFormFields />
+                 <ProfileFormFields isEditMode={true} />
                  <button onClick={() => handleProfileSubmit(true)} disabled={loading} className="w-full bg-black text-white font-bold py-3 rounded-lg">保存修改</button>
               </div>
             </div>
