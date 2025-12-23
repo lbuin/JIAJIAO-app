@@ -276,11 +276,8 @@ export const StudentHome: React.FC = () => {
       if (!tempPassword) return alert("请输入密码");
       
       if (!cachedProfileForAuth || !cachedProfileForAuth.password) {
-          // Fallback: If no password set in DB (old user), let them in or force update.
-          // For now, if no password in DB, we treat empty input as valid or just let them in?
-          // Let's enforce strictness: If they have no password in DB, they should have gone to register/update flow?
-          // Actually, if legacy user has no password, let's allow them to set it.
-          // For simplicity: We only matched passwords if it exists.
+          // Fallback: If no password set in DB (old user), let them in but warn.
+          // In a real app we might force them to set it.
            if (cachedProfileForAuth && !cachedProfileForAuth.password) {
                alert("您的账号尚未设置密码，请联系管理员或重新注册");
                return;
@@ -317,6 +314,7 @@ export const StudentHome: React.FC = () => {
   const handleProfileSubmit = async (isEditMode = false) => {
     if (!profileForm.name || !profileForm.school) return alert("请填写必填项");
     if (!isEditMode && !profileForm.password) return alert("请设置登录密码");
+    if (isEditMode && !profileForm.password) return alert("密码不能为空");
     
     setLoading(true);
     // If editing, use logged in contact. If new flow, use tempContact.
@@ -495,13 +493,19 @@ export const StudentHome: React.FC = () => {
             </div>
           </div>
 
-          {/* Password Field (Only show for new registrations or if explicit edit requested) */}
-          {!isEditMode && (
-             <div>
-                <label className="text-xs text-gray-500 font-bold">设置登录密码 *</label>
-                <input type="password" className="w-full border p-2 rounded text-sm bg-gray-50" placeholder="请设置您的登录密码" value={profileForm.password} onChange={e=>setProfileForm({...profileForm, password:e.target.value})} />
-             </div>
-          )}
+          {/* Password Field: Shown in both modes, but logic differs */}
+          <div>
+            <label className="text-xs text-gray-500 font-bold">
+                {isEditMode ? "修改登录密码" : "设置登录密码 *"}
+            </label>
+            <input 
+                type="password" 
+                className="w-full border p-2 rounded text-sm bg-gray-50" 
+                placeholder={isEditMode ? "如不修改请保持原样" : "请设置您的登录密码"} 
+                value={profileForm.password} 
+                onChange={e=>setProfileForm({...profileForm, password:e.target.value})} 
+            />
+          </div>
 
           <div className="grid grid-cols-2 gap-3">
              <div>
