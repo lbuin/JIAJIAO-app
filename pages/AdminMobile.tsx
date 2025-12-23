@@ -158,8 +158,6 @@ export const AdminMobile: React.FC = () => {
           alert("删除成功");
           // Update state locally to reflect changes
           setPendingJobs(prev => prev.filter(j => j.id !== jobId));
-          // If deleted from finance list, we need to refetch or filter logic. 
-          // Since finance list is based on orders, and we deleted orders, filtering orders works.
           setOrders(prev => prev.filter(o => o.job_id !== jobId));
       }
   };
@@ -173,6 +171,13 @@ export const AdminMobile: React.FC = () => {
   });
 
   const financeOrders = orders.filter(o => o.status === OrderStatus.PAYMENT_PENDING || o.status === OrderStatus.FINAL_APPROVED);
+
+  // --- HELPER ---
+  const getGenderLabel = (gender?: string) => {
+      if (gender === 'male') return <span className="text-blue-600 font-bold text-[10px] bg-blue-50 px-1 rounded">男</span>;
+      if (gender === 'female') return <span className="text-pink-600 font-bold text-[10px] bg-pink-50 px-1 rounded">女</span>;
+      return null;
+  };
 
   if (!isAuthenticated) {
     return (
@@ -220,7 +225,10 @@ export const AdminMobile: React.FC = () => {
                              <div className="flex justify-between items-start pr-6">
                                 <div>
                                     <h3 className="font-bold text-gray-800">{job.title}</h3>
-                                    <p className="text-xs text-blue-600 mt-1">{job.price} · 每周{job.frequency}次</p>
+                                    <p className="text-xs text-blue-600 mt-1">
+                                        {job.price} · 每周{job.frequency}次 · 
+                                        {job.sex_requirement === 'male' ? '限男' : job.sex_requirement === 'female' ? '限女' : '不限'}
+                                    </p>
                                 </div>
                                 <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full font-bold">
                                     {group.length} 人申请
@@ -243,8 +251,9 @@ export const AdminMobile: React.FC = () => {
                             {group.map(order => (
                                 <div key={order.id} className="p-4">
                                     <div className="flex justify-between items-start mb-2">
-                                        <div>
-                                            <span className="font-bold text-gray-800 mr-2">{order.profile?.name || order.student_contact}</span>
+                                        <div className="flex items-center gap-2">
+                                            <span className="font-bold text-gray-800">{order.profile?.name || order.student_contact}</span>
+                                            {getGenderLabel(order.profile?.gender)}
                                             {order.status === OrderStatus.PARENT_APPROVED && <span className="text-[10px] bg-green-100 text-green-700 px-1 rounded">已通过初审</span>}
                                         </div>
                                         <div className="text-xs text-gray-400">#{order.id}</div>
@@ -284,7 +293,10 @@ export const AdminMobile: React.FC = () => {
                         <span className="text-xs text-gray-400">#{order.id}</span>
                     </div>
                     <div className="mb-4">
-                        <div className="font-bold text-gray-800">{order.profile?.name || order.student_contact}</div>
+                        <div className="font-bold text-gray-800 flex items-center gap-2">
+                            {order.profile?.name || order.student_contact}
+                            {getGenderLabel(order.profile?.gender)}
+                        </div>
                         <div className="text-sm text-gray-500">申请: {order.jobs?.title}</div>
                         <div className="text-xs text-gray-400 mt-1">学生电话: {order.student_contact}</div>
                     </div>
@@ -321,7 +333,10 @@ export const AdminMobile: React.FC = () => {
                 <div key={job.id} className="bg-white rounded-2xl shadow-sm p-5 border border-gray-100">
                     <div className="mb-3">
                         <h3 className="font-bold text-lg text-gray-900 mb-1">{job.title}</h3>
-                        <p className="text-sm text-gray-500">{job.grade} {job.subject} · {job.price} · 每周{job.frequency}次</p>
+                        <p className="text-sm text-gray-500">
+                            {job.grade} {job.subject} · {job.price} · 每周{job.frequency}次 · 
+                            {job.sex_requirement === 'male' ? '限男' : job.sex_requirement === 'female' ? '限女' : '不限'}
+                        </p>
                         <p className="text-xs text-gray-400 mt-1">发布人: {job.contact_name} ({job.contact_phone})</p>
                     </div>
                     <div className="flex gap-2 items-center">
