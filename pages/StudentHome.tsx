@@ -333,10 +333,16 @@ export const StudentHome: React.FC = () => {
     };
   };
 
+  // --- KEY FIX HERE: Explicitly passing job or setting state before check ---
   const handleJobAction = (job: Job) => {
+    // 1. Always set selected job immediately so modal knows what to display
+    setSelectedJob(job);
+    setCalculatedFee(calculateInfoFee(job));
+
     if (!studentContact) {
         setStep('input_contact');
         setTempContact('');
+        // Modal opens because selectedJob is now set
     } else {
         if (job.sex_requirement && job.sex_requirement !== 'unlimited') {
             if (!myProfile?.gender) {
@@ -351,17 +357,15 @@ export const StudentHome: React.FC = () => {
         }
         const order = orders.find(o => o.job_id === job.id);
         const status = order?.status;
-        setTempContact(studentContact);
+        
         if (status === OrderStatus.PARENT_APPROVED) {
             setStep('show_qr');
         } else {
             if (status && status !== OrderStatus.REJECTED) return alert("您已申请该职位");
-            handleDirectApply();
-            return;
+            // 2. Direct Apply: Pass the job explicitly to avoid state race condition
+            submitApplication(studentContact, job);
         }
     }
-    setSelectedJob(job);
-    setCalculatedFee(calculateInfoFee(job));
   };
 
   const handleLoginClick = () => {
@@ -369,12 +373,6 @@ export const StudentHome: React.FC = () => {
       setTempContact('');
       setTempPassword('');
       setIsLoginModalOpen(true);
-  };
-
-  const handleDirectApply = () => {
-      setSelectedJob(prev => prev);
-      setStep('show_qr'); 
-      submitApplication(studentContact);
   };
 
   const checkPhoneAndProceed = async () => {
@@ -417,17 +415,14 @@ export const StudentHome: React.FC = () => {
           setIsLoginModalOpen(false);
           alert("登录成功");
       } else {
-          if (selectedJob) await submitApplication(phone);
+          // If we were in the middle of applying, continue
+          if (selectedJob) await submitApplication(phone, selectedJob);
       }
   };
 
   const handleProfileSubmit = async (isEditMode = false) => {
     if (!profileForm.name || !profileForm.school) return alert("请填写必填项");
     if (!isEditMode && !profileForm.password) return alert("请设置登录密码");
-    
-    // In edit mode, if password is empty, it means user didn't change it.
-    // If not empty, we update it.
-    // For upsert, we need to be careful not to overwrite password with empty string if we don't mean to.
     
     setLoading(true);
     const contactToUse = (isEditMode || studentContact) ? studentContact : tempContact;
@@ -445,26 +440,16 @@ export const StudentHome: React.FC = () => {
         gender: profileForm.gender
     };
     
-    // Only update password if provided
     if (profileForm.password) {
         payload.password = profileForm.password;
     }
 
     try {
-      // First, get existing profile to preserve fields not in form if necessary (though we map most)
-      // Supabase upsert: if we omit password in payload, and row exists, it might NOT update password column if we use a partial update? 
-      // Actually, upsert replaces the row or inserts. 
-      // Safe bet: Fetch current profile first if edit mode and password is blank
-      
       let finalPayload = { ...payload };
       if (isEditMode && !profileForm.password) {
-          // Exclude password from payload so we don't overwrite it with empty string
-          // But upsert overwrites everything. We need to fetch old password or use UPDATE instead of UPSERT.
-          // Let's use Update if edit mode.
           const { error } = await supabase.from('profiles').update(payload).eq('phone', contactToUse);
           if (error) throw error;
       } else {
-          // Register or Password Change
           const { error } = await supabase.from('profiles').upsert([finalPayload], { onConflict: 'phone' });
           if (error) throw error;
       }
@@ -481,7 +466,8 @@ export const StudentHome: React.FC = () => {
           fetchOrders(contactToUse);
           alert("注册成功！");
       } else {
-          await submitApplication(contactToUse);
+          // Continue application if we have a job selected
+          if (selectedJob) await submitApplication(contactToUse, selectedJob);
       }
     } catch (err: any) {
       alert("错误: " + err.message);
@@ -489,16 +475,21 @@ export const StudentHome: React.FC = () => {
     setLoading(false);
   };
 
-  const submitApplication = async (contact = studentContact) => {
-    if (!selectedJob) return;
-    const existing = orders.find(o => o.job_id === selectedJob.id && o.status !== OrderStatus.REJECTED);
+  // --- KEY FIX: Accept job argument explicitly ---
+  const submitApplication = async (contact = studentContact, jobToSubmit: Job | null = selectedJob) => {
+    if (!jobToSubmit) {
+        alert("错误：未选择职位，请刷新重试");
+        return;
+    }
+    
+    const existing = orders.find(o => o.job_id === jobToSubmit.id && o.status !== OrderStatus.REJECTED);
     if (existing) {
         alert("已申请过此职位");
         setSelectedJob(null);
         return;
     }
     const { error } = await supabase.from('orders').insert([{
-        job_id: selectedJob.id,
+        job_id: jobToSubmit.id,
         student_contact: contact,
         status: OrderStatus.APPLYING 
     }]);
