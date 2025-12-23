@@ -1,9 +1,11 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { supabase, isConfigured } from '../lib/supabaseClient';
-import { IconArrowLeft, IconCheck } from '../components/Icons';
-import { CreateJobParams } from '../types';
+import { IconArrowLeft, IconCheck, IconPlus, IconTrash, IconRefresh } from '../components/Icons';
+import { CreateJobParams, Job } from '../types';
+
+const PARENT_PHONE_KEY = 'tutor_match_parent_contact';
 
 const SUGGESTED_GRADES = [
   '小学一年级', '小学二年级', '小学三年级', '小学四年级', '小学五年级', '小学六年级',
@@ -19,108 +21,247 @@ const SUGGESTED_SUBJECTS = [
   '科学', '编程', '钢琴', '美术'
 ];
 
+type ViewState = 'login' | 'dashboard' | 'form';
+
 export const ParentPost: React.FC = () => {
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(false);
-  const [success, setSuccess] = useState(false);
+  const [view, setView] = useState<ViewState>('login');
   
+  // Parent Identity
+  const [parentPhone, setParentPhone] = useState('');
+  
+  // Dashboard Data
+  const [myJobs, setMyJobs] = useState<Job[]>([]);
+  const [loadingList, setLoadingList] = useState(false);
+
   // Form State
+  const [loadingSubmit, setLoadingSubmit] = useState(false);
   const [formData, setFormData] = useState<CreateJobParams>({
     title: '',
     grade: '',
     subject: '',
     price: '',
-    frequency: 1, // Default to 1 time per week
+    frequency: 1,
     address: '',
     contact_name: '',
     contact_phone: ''
   });
 
+  // --- Initialization ---
   useEffect(() => {
     if (!isConfigured()) {
       alert("请先联系管理员配置数据库连接");
       navigate('/');
+      return;
+    }
+
+    const cachedPhone = localStorage.getItem(PARENT_PHONE_KEY);
+    if (cachedPhone) {
+      setParentPhone(cachedPhone);
+      setFormData(prev => ({ ...prev, contact_phone: cachedPhone }));
+      setView('dashboard');
     }
   }, [navigate]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+  // --- Fetch Logic ---
+  const fetchMyJobs = useCallback(async () => {
+    if (!parentPhone) return;
+    setLoadingList(true);
+    const { data, error } = await supabase
+      .from('jobs')
+      .select('*')
+      .eq('contact_phone', parentPhone)
+      .order('created_at', { ascending: false });
+    
+    if (error) console.error(error);
+    else setMyJobs(data || []);
+    setLoadingList(false);
+  }, [parentPhone]);
+
+  // --- Realtime Subscription ---
+  useEffect(() => {
+    if (view === 'dashboard' && parentPhone) {
+      fetchMyJobs();
+
+      const channel = supabase.channel('parent_jobs')
+        .on('postgres_changes', 
+          { event: '*', schema: 'public', table: 'jobs', filter: `contact_phone=eq.${parentPhone}` }, 
+          () => fetchMyJobs()
+        )
+        .subscribe();
+
+      return () => { supabase.removeChannel(channel); };
+    }
+  }, [view, parentPhone, fetchMyJobs]);
+
+  // --- Handlers ---
+  const handleLogin = () => {
+    if (!/^\d{11}$/.test(parentPhone)) return alert("请输入11位手机号");
+    localStorage.setItem(PARENT_PHONE_KEY, parentPhone);
+    setFormData(prev => ({ ...prev, contact_phone: parentPhone }));
+    setView('dashboard');
+  };
+
+  const handleLogout = () => {
+    if(confirm("确定要更换手机号吗？")) {
+        localStorage.removeItem(PARENT_PHONE_KEY);
+        setParentPhone('');
+        setView('login');
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    if(!confirm("确定要删除这条需求吗？")) return;
+    await supabase.from('jobs').delete().eq('id', id);
+    fetchMyJobs();
+  };
+
+  const handleFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
   const handleSubmit = async () => {
-    // Validation
-    if (!formData.title || !formData.contact_phone || !formData.price) {
-      return alert("请填写完整信息");
-    }
+    if (!formData.title || !formData.contact_phone || !formData.price) return alert("请填写完整信息");
+    if (!/^\d{11}$/.test(formData.contact_phone)) return alert("手机号必须是 11 位数字");
 
-    // Phone Number Validation (Must be 11 digits)
-    if (!/^\d{11}$/.test(formData.contact_phone)) {
-        return alert("提交失败：手机号必须是 11 位数字");
-    }
-
-    setLoading(true);
+    setLoadingSubmit(true);
     try {
       const { error } = await supabase.from('jobs').insert([{
         ...formData,
-        is_active: false, // Default to inactive until approved by admin
-        status: 'pending' // Explicit pending status for admin review
+        is_active: false,
+        status: 'pending'
       }]);
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
-      setSuccess(true);
+      alert("发布成功！请等待管理员审核。");
+      // Reset form (except phone)
+      setFormData({
+        title: '', grade: '', subject: '', price: '', frequency: 1, address: '', contact_name: '', contact_phone: parentPhone
+      });
+      setView('dashboard');
     } catch (err: any) {
       alert("发布失败: " + err.message);
     } finally {
-      setLoading(false);
+      setLoadingSubmit(false);
     }
   };
 
-  if (success) {
+  // --- Helper: Status Badge ---
+  const getStatusBadge = (status?: string) => {
+    switch (status) {
+      case 'published': return <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded text-xs font-bold">已发布 (找老师中)</span>;
+      case 'taken': return <span className="bg-gray-100 text-gray-500 px-2 py-0.5 rounded text-xs font-bold">已解决</span>;
+      case 'rejected': return <span className="bg-red-100 text-red-600 px-2 py-0.5 rounded text-xs font-bold">审核未通过</span>;
+      default: return <span className="bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded text-xs font-bold">审核中</span>;
+    }
+  };
+
+  // --- VIEW 1: LOGIN (Phone Entry) ---
+  if (view === 'login') {
     return (
-      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6 text-center">
-        <div className="bg-green-100 p-4 rounded-full mb-4">
-          <IconCheck className="w-10 h-10 text-green-600" />
-        </div>
-        <h2 className="text-2xl font-bold text-gray-800 mb-2">提交成功！</h2>
-        <p className="text-gray-600 mb-8 max-w-xs mx-auto">
-          您的需求已收到。平台老师会尽快审核，并为您匹配合适的教员。
-          <br/><br/>
-          如果有合适的大学生申请，我们会通过电话联系您。
-        </p>
-        <div className="space-y-3 w-full max-w-xs">
-            <Link to="/" className="block w-full bg-black text-white px-6 py-3 rounded-xl font-bold hover:bg-gray-800 transition-colors">
-            返回首页
-            </Link>
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6">
+         <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm text-center">
+            <h2 className="text-xl font-bold mb-2">我是家长/学员</h2>
+            <p className="text-gray-500 text-sm mb-6">输入手机号查看发布记录或发布新需求</p>
+            <input 
+              type="tel" 
+              className="w-full border p-4 rounded-xl mb-4 text-center text-lg outline-none focus:ring-2 focus:ring-blue-500" 
+              placeholder="请输入您的手机号" 
+              value={parentPhone} 
+              onChange={e => setParentPhone(e.target.value)} 
+              maxLength={11}
+            />
+            <button onClick={handleLogin} className="w-full bg-black text-white font-bold py-4 rounded-xl shadow-lg">进入</button>
+            <Link to="/" className="block mt-6 text-sm text-gray-400">返回学生端</Link>
+         </div>
+      </div>
+    );
+  }
+
+  // --- VIEW 2: DASHBOARD (List) ---
+  if (view === 'dashboard') {
+    return (
+      <div className="min-h-screen bg-gray-50 pb-24">
+        <header className="bg-white sticky top-0 z-10 border-b border-gray-100 px-4 h-16 flex items-center justify-between shadow-sm">
+           <Link to="/" className="text-gray-600"><IconArrowLeft className="w-6 h-6"/></Link>
+           <h1 className="text-lg font-bold">我的发布管理</h1>
+           <button onClick={handleLogout} className="text-xs text-gray-400">切换账号</button>
+        </header>
+
+        <main className="p-4 max-w-lg mx-auto space-y-4">
+           {/* Header Info */}
+           <div className="flex justify-between items-center px-1">
+              <div className="text-sm text-gray-500">
+                当前账号: <span className="font-mono font-bold text-gray-800">{parentPhone}</span>
+              </div>
+              <button onClick={() => fetchMyJobs()} className="text-blue-600 p-1"><IconRefresh className="w-4 h-4"/></button>
+           </div>
+
+           {/* Job List */}
+           {loadingList ? (
+             <div className="text-center py-10 text-gray-400">加载中...</div>
+           ) : myJobs.length === 0 ? (
+             <div className="bg-white rounded-xl p-8 text-center border border-dashed border-gray-300">
+                <p className="text-gray-400 mb-4">您还没有发布过需求</p>
+                <button onClick={() => setView('form')} className="bg-black text-white px-6 py-2 rounded-lg font-bold text-sm">立即发布第一条</button>
+             </div>
+           ) : (
+             <div className="space-y-3">
+               {myJobs.map(job => (
+                 <div key={job.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 relative">
+                    <div className="flex justify-between items-start mb-2 pr-6">
+                        <h3 className="font-bold text-gray-800 line-clamp-1">{job.title}</h3>
+                        {getStatusBadge(job.status)}
+                    </div>
+                    <div className="text-xs text-gray-500 space-y-1">
+                        <p>{job.grade} {job.subject} · {job.price}</p>
+                        <p className="text-gray-400">{new Date(job.created_at || '').toLocaleString()}</p>
+                    </div>
+                    
+                    {/* Delete Button */}
+                    <button onClick={() => handleDelete(job.id)} className="absolute bottom-4 right-4 text-gray-300 hover:text-red-500">
+                        <IconTrash className="w-4 h-4" />
+                    </button>
+                 </div>
+               ))}
+               <div className="text-center text-xs text-gray-400 mt-4">状态实时更新中</div>
+             </div>
+           )}
+        </main>
+
+        {/* Floating Action Button */}
+        <div className="fixed bottom-8 right-6">
+            <button 
+                onClick={() => setView('form')}
+                className="bg-black text-white w-14 h-14 rounded-full shadow-2xl flex items-center justify-center hover:scale-105 transition-transform"
+            >
+                <IconPlus className="w-8 h-8" />
+            </button>
         </div>
       </div>
     );
   }
 
+  // --- VIEW 3: FORM (Create) ---
   return (
     <div className="min-h-screen bg-white pb-20">
       <header className="sticky top-0 z-10 bg-white/80 backdrop-blur-md border-b border-gray-100 px-4 h-16 flex items-center gap-3">
-        <Link to="/" className="p-2 -ml-2 text-gray-600 hover:text-black">
+        <button onClick={() => setView('dashboard')} className="p-2 -ml-2 text-gray-600 hover:text-black">
           <IconArrowLeft className="w-6 h-6" />
-        </Link>
-        <h1 className="text-lg font-bold text-gray-800">发布家教需求</h1>
+        </button>
+        <h1 className="text-lg font-bold text-gray-800">发布新需求</h1>
       </header>
 
       <main className="p-5 max-w-lg mx-auto space-y-6">
-        <div className="bg-blue-50 p-4 rounded-xl text-blue-800 text-sm">
-          📝 家长您好，请填写您的要求。平台将为您人工筛选优质大学生教员。
-        </div>
-
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-bold text-gray-700 mb-1">标题 *</label>
             <input 
               name="title"
               value={formData.title}
-              onChange={handleChange}
+              onChange={handleFormChange}
               className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-blue-500 outline-none"
               placeholder="例如：急找初二数学家教，周末上课"
             />
@@ -133,7 +274,7 @@ export const ParentPost: React.FC = () => {
                 name="grade"
                 list="grade-list"
                 value={formData.grade}
-                onChange={handleChange}
+                onChange={handleFormChange}
                 className="w-full border border-gray-300 rounded-lg p-3 outline-none"
                 placeholder="选择或输入"
               />
@@ -147,7 +288,7 @@ export const ParentPost: React.FC = () => {
                 name="subject"
                 list="subject-list"
                 value={formData.subject}
-                onChange={handleChange}
+                onChange={handleFormChange}
                 className="w-full border border-gray-300 rounded-lg p-3 outline-none"
                 placeholder="选择或输入"
               />
@@ -163,7 +304,7 @@ export const ParentPost: React.FC = () => {
                 <select 
                     name="frequency"
                     value={formData.frequency}
-                    onChange={handleChange}
+                    onChange={handleFormChange}
                     className="w-full border border-gray-300 rounded-lg p-3 outline-none bg-white"
                 >
                     {[1,2,3,4,5,6,7].map(num => (
@@ -176,7 +317,7 @@ export const ParentPost: React.FC = () => {
                 <input 
                     name="price"
                     value={formData.price}
-                    onChange={handleChange}
+                    onChange={handleFormChange}
                     className="w-full border border-gray-300 rounded-lg p-3 outline-none"
                     placeholder="例如：100"
                 />
@@ -188,7 +329,7 @@ export const ParentPost: React.FC = () => {
             <input 
               name="address"
               value={formData.address}
-              onChange={handleChange}
+              onChange={handleFormChange}
               className="w-full border border-gray-300 rounded-lg p-3 outline-none"
               placeholder="例如：海淀区知春路附近"
             />
@@ -202,7 +343,7 @@ export const ParentPost: React.FC = () => {
                 <input 
                   name="contact_name"
                   value={formData.contact_name}
-                  onChange={handleChange}
+                  onChange={handleFormChange}
                   className="w-full border border-gray-300 rounded-lg p-3 outline-none"
                   placeholder="例如：张女士"
                 />
@@ -212,31 +353,21 @@ export const ParentPost: React.FC = () => {
                 <input 
                   name="contact_phone"
                   value={formData.contact_phone}
-                  onChange={handleChange}
-                  className="w-full border border-gray-300 rounded-lg p-3 outline-none"
-                  placeholder="仅平台可见，用于联系您"
-                  type="tel"
-                  maxLength={11}
+                  readOnly
+                  className="w-full border border-gray-300 rounded-lg p-3 outline-none bg-gray-100 text-gray-500"
                 />
               </div>
             </div>
-            <p className="text-xs text-gray-400 mt-2">
-                * 您的电话号码将被严格保密，仅用于管理员核实需求。
-            </p>
           </div>
         </div>
 
         <button 
           onClick={handleSubmit}
-          disabled={loading}
+          disabled={loadingSubmit}
           className="w-full bg-black text-white font-bold py-4 rounded-xl hover:bg-gray-800 transition-colors shadow-lg disabled:opacity-50 mt-4"
         >
-          {loading ? '提交中...' : '提交需求'}
+          {loadingSubmit ? '提交中...' : '提交需求'}
         </button>
-
-        <div className="mt-8 text-center text-sm text-gray-400">
-            如遇问题，请联系客服QQ: <span className="font-bold text-gray-600 select-all">1400470321</span>
-        </div>
       </main>
     </div>
   );
